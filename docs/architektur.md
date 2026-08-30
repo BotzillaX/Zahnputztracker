@@ -62,3 +62,49 @@ abgewiesen.
 Beim Start prüft der Dienst die Tabelle `dispatch`. Ein Vermerk ohne Bestätigung
 bedeutet Absturz zwischen Versand und Bestätigung: der Eintrag wandert auf
 `unklar`, nie auf `kontaktiert`, und wird nie von selbst erneut versendet.
+
+## Browser-Betrieb
+
+Zwei permanente Instanzen, beide mit genau einem Tab, beide über dieselbe
+Verbindung. Die Trennung ist eine harte Anforderung: die suchende Instanz ist
+nicht angemeldet, die arbeitende ist es.
+
+| Instanz | Profil | Fingerabdruck |
+|---|---|---|
+| Such-Browser | wird bei jedem Anwendungsstart verworfen | dadurch bei jedem Start neu |
+| Sitzungs-Browser | dauerhaft | einmal erzeugt, in `launch-options.json` im Profil festgehalten und danach wiederverwendet |
+
+Beide Profile liegen unter `%LOCALAPPDATA%\Zahnputztracker\profiles\`, das
+Browser-Programm unter `%LOCALAPPDATA%\Zahnputztracker\browser\`. Es wird beim
+ersten Bedarf von der offiziellen Quelle geladen; der Fortschritt läuft über den
+Ereignisstrom in die Oberfläche.
+
+### Ein-Tab-Regel
+
+Verweise werden nie angeklickt, es wird immer über die Adresszeile navigiert.
+Zusätzlich lauscht jede Instanz auf neue Seiten: entsteht doch eine, wird sie
+sofort geschlossen und gezählt. Der Zähler steht in der Oberfläche, das Ereignis
+im Strom.
+
+### Sichtbarkeit: wer macht was
+
+Die Aufteilung folgt der Regel, dass Fensterverwaltung Sache des Kerns ist.
+
+| Teil | Aufgabe |
+|---|---|
+| Dienst (Python) | kennt den gewünschten Zustand je Instanz und meldet ihn samt Prozessliste unter `/browser/windows` |
+| Kern (Rust) | fragt diesen Zustand viermal je Sekunde ab und setzt ihn um |
+
+Ein Browserlauf besitzt mehrere Fenster, die meisten davon Hilfsfenster, die nie
+sichtbar sein sollen. Deshalb blendet der Kern nur aus, was gerade sichtbar ist,
+und blendet nur das wieder ein, was er selbst ausgeblendet hat. Eingeblendet wird
+ohne Aktivierung, damit kein Fenster den Fokus stiehlt.
+
+Weil der gewünschte Zustand im Dienst liegt, können Oberfläche und Tray dasselbe
+schalten, ohne sich gegenseitig zu überschreiben.
+
+### Anhalten
+
+Anhalten ist ein Schalter im Dienst. Beide Browser bleiben offen und behalten
+ihren Zustand, es wird nichts neu geladen. Das Tray zeigt den Zustand an und
+schaltet ihn um.

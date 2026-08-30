@@ -25,6 +25,8 @@ from fastapi import (
 from fastapi.middleware.cors import CORSMiddleware
 
 from .. import __version__
+from .. import runtime
+from ..runtime import browser_install
 from ..storage import config as config_store
 from ..storage import database, secrets
 from .events import bus
@@ -142,6 +144,77 @@ def create_app(token: str) -> FastAPI:
             }
         finally:
             connection.close()
+
+    # ----------------------------------------------------------------- browser
+
+    @app.get("/browser", dependencies=guard)
+    async def browser_state() -> dict:
+        return runtime.fleet.snapshot()
+
+    @app.get("/browser/windows", dependencies=guard)
+    async def browser_windows() -> dict:
+        """What the host process enforces: process id and wanted visibility."""
+        return {"windows": runtime.fleet.wanted_windows()}
+
+    @app.post("/browser/install", dependencies=guard)
+    async def browser_install_start(body: Dict[str, Any] = Body(default={})) -> dict:
+        if browser_install.busy():
+            raise HTTPException(status_code=409, detail="Es laeuft bereits ein Download")
+        replace = bool(body.get("replace", False))
+
+        def progress(phase: str, done: int, total: int) -> None:
+            bus.publish("browser_download", phase=phase, done=done, total=total)
+
+        async def worker() -> None:
+            try:
+                result = await asyncio.to_thread(browser_install.install, progress, replace)
+            except Exception as error:  # noqa: BLE001 - reported to the user
+                bus.publish("browser_download", phase="fehler", message=str(error))
+                return
+            bus.publish("browser_download", phase="fertig", **result)
+
+        asyncio.create_task(worker())
+        return {"started": True}
+
+    @app.post("/browser/start", dependencies=guard)
+    async def browser_start() -> dict:
+        settings = config_store.load()
+        try:
+            return await runtime.fleet.start(settings.get("browsers", {}))
+        except runtime.BrowserError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+
+    @app.post("/browser/stop", dependencies=guard)
+    async def browser_stop() -> dict:
+        return await runtime.fleet.stop()
+
+    @app.post("/browser/pause", dependencies=guard)
+    async def browser_pause(body: Dict[str, Any] = Body(default={})) -> dict:
+        return runtime.fleet.set_paused(bool(body.get("paused", True)))
+
+    @app.post("/browser/{role}/visibility", dependencies=guard)
+    async def browser_visibility(role: str, body: Dict[str, Any] = Body(...)) -> dict:
+        try:
+            return runtime.fleet.set_visible(role, bool(body.get("visible", False)))
+        except runtime.BrowserError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+
+    @app.post("/browser/{role}/navigate", dependencies=guard)
+    async def browser_navigate(role: str, body: Dict[str, Any] = Body(default={})) -> dict:
+        settings = config_store.load()
+        url = str(body.get("url") or settings.get("source", {}).get("url") or "").strip()
+        if not url:
+            raise HTTPException(status_code=422, detail="Keine Adresse hinterlegt")
+        try:
+            instance = runtime.fleet.instance(role)
+            reached = await instance.navigate(url, float(settings["limits"]["search.reload"]))
+        except runtime.BrowserError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+        except Exception as error:  # noqa: BLE001 - navigation failures are expected
+            bus.publish("browser_failed", role=role, message=str(error))
+            raise HTTPException(status_code=502, detail=str(error)) from error
+        bus.publish("browser_navigated", role=role, url=reached)
+        return runtime.fleet.snapshot()
 
     # ------------------------------------------------------------------ stream
 

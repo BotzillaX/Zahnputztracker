@@ -66,3 +66,16 @@ export const loescheGeheimnis = (name) => request(`/secrets/${name}`, { method: 
 export const ladeEintraege = (status) =>
   request(`/items${status ? `?status=${encodeURIComponent(status)}` : ""}`);
 export const ladeUnklare = () => request("/items/unclear");
+
+export const ladeBrowser = () => request("/browser");
+export const starteBrowser = () => request("/browser/start", { method: "POST" });
+export const stoppeBrowser = () => request("/browser/stop", { method: "POST" });
+export const ladeBrowserProgramm = (ersetzen = false) =>
+  request("/browser/install", { method: "POST", body: { replace: ersetzen } });
+export const setzePause = (pausiert) =>
+  request("/browser/pause", { method: "POST", body: { paused: pausiert } });
+export const setzeSichtbar = (rolle, sichtbar) =>
+  request(`/browser/${rolle}/visibility`, { method: "POST", body: { visible: sichtbar } });
+export const gehZu = (rolle, url) =>
+  request(`/browser/${rolle}/navigate`, { method: "POST", body: url ? { url } : {} });
+export const zaehleFenster = (pids) => invoke("browser_window_count", { pids });

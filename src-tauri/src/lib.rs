@@ -1,5 +1,7 @@
 mod secrets;
 mod supervisor;
+mod tray;
+mod windows;
 
 use std::sync::Arc;
 
@@ -22,18 +24,30 @@ fn service_restart(state: tauri::State<Arc<Supervisor>>) {
     supervisor::restart(&state);
 }
 
+/// How many windows of an instance are currently visible. Used by the
+/// user interface to show that hiding really happened.
+#[tauri::command]
+fn browser_window_count(pids: Vec<u32>) -> usize {
+    windows::visible_window_count(&pids)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .setup(|app| {
-            app.manage(Arc::new(Supervisor::new()));
+            let supervisor = Arc::new(Supervisor::new());
+            app.manage(supervisor.clone());
             supervisor::launch(app.handle().clone());
+            tray::install(app.handle())?;
+            tray::watch(app.handle().clone(), supervisor.clone());
+            windows::enforce(supervisor);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             service_endpoint,
             service_status,
-            service_restart
+            service_restart,
+            browser_window_count
         ])
         .run(tauri::generate_context!())
         .expect("Anwendung konnte nicht gestartet werden");
