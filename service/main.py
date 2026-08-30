@@ -25,8 +25,9 @@ from pathlib import Path
 import uvicorn
 
 from . import __version__
+from .api.events import bus
 from .api.server import create_app
-from .storage import paths
+from .storage import database, paths
 
 
 def _read_token(cli_token: str | None) -> str:
@@ -88,6 +89,17 @@ def main(argv: list[str] | None = None) -> int:
         if running is not None:
             print(json.dumps({"event": "already_running", "port": running}), flush=True)
             return 3
+
+    # A send marker without confirmation means the application died
+    # between sending and confirming. Such an item goes onto the
+    # "unclear" list and is never sent again on its own.
+    connection = database.connect()
+    try:
+        stranded = database.resolve_open_dispatches(connection)
+    finally:
+        connection.close()
+    if stranded:
+        bus.publish("dispatch_unclear", keys=stranded)
 
     token = _read_token(args.token)
     port = _free_port()

@@ -10,12 +10,23 @@ import asyncio
 import hmac
 import os
 import time
-from typing import Optional
+from typing import Any, Dict, Optional
 
-from fastapi import FastAPI, Header, HTTPException, Query, WebSocket, WebSocketDisconnect
+from fastapi import (
+    Body,
+    Depends,
+    FastAPI,
+    Header,
+    HTTPException,
+    Query,
+    WebSocket,
+    WebSocketDisconnect,
+)
 from fastapi.middleware.cors import CORSMiddleware
 
 from .. import __version__
+from ..storage import config as config_store
+from ..storage import database, secrets
 from .events import bus
 
 HEARTBEAT_SECONDS = 15.0
@@ -34,13 +45,16 @@ def create_app(token: str) -> FastAPI:
         allow_headers=["*"],
     )
 
-    def check(candidate: Optional[str]) -> None:
-        if not candidate or not hmac.compare_digest(candidate, token):
+    def authorised(x_auth_token: Optional[str] = Header(default=None)) -> None:
+        if not x_auth_token or not hmac.compare_digest(x_auth_token, token):
             raise HTTPException(status_code=401, detail="unauthorized")
 
-    @app.get("/health")
-    async def health(x_auth_token: Optional[str] = Header(default=None)) -> dict:
-        check(x_auth_token)
+    guard = [Depends(authorised)]
+
+    # ------------------------------------------------------------------ state
+
+    @app.get("/health", dependencies=guard)
+    async def health() -> dict:
         return {
             "status": "ok",
             "version": __version__,
@@ -49,16 +63,94 @@ def create_app(token: str) -> FastAPI:
             "listeners": bus.subscriber_count,
         }
 
-    @app.post("/ping")
-    async def ping(x_auth_token: Optional[str] = Header(default=None)) -> dict:
+    @app.post("/ping", dependencies=guard)
+    async def ping() -> dict:
         """Emit a test event. Used to verify the live stream end to end."""
-        check(x_auth_token)
-        event = bus.publish("ping", message="Testereignis")
-        return {"published": event}
+        return {"published": bus.publish("ping", message="Testereignis")}
+
+    # ---------------------------------------------------------------- settings
+
+    @app.get("/config", dependencies=guard)
+    async def read_config() -> dict:
+        return config_store.load()
+
+    @app.get("/config/defaults", dependencies=guard)
+    async def read_defaults() -> dict:
+        return config_store.DEFAULTS
+
+    @app.put("/config", dependencies=guard)
+    async def write_config(candidate: Dict[str, Any] = Body(...)) -> dict:
+        try:
+            stored = config_store.save(candidate)
+        except config_store.ConfigError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+        bus.publish("config_saved")
+        return stored
+
+    # ----------------------------------------------------------------- secrets
+
+    @app.get("/secrets", dependencies=guard)
+    async def read_secrets() -> list:
+        return secrets.status()
+
+    @app.put("/secrets/{name}", dependencies=guard)
+    async def write_secret(name: str, body: Dict[str, str] = Body(...)) -> dict:
+        try:
+            secrets.set_value(name, body.get("value", ""))
+        except secrets.UnknownSecret:
+            raise HTTPException(status_code=404, detail="unbekanntes Geheimnis") from None
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+        bus.publish("secret_changed", name=name, present=True)
+        return {"name": name, "present": True}
+
+    @app.delete("/secrets/{name}", dependencies=guard)
+    async def drop_secret(name: str) -> dict:
+        try:
+            secrets.delete(name)
+        except secrets.UnknownSecret:
+            raise HTTPException(status_code=404, detail="unbekanntes Geheimnis") from None
+        bus.publish("secret_changed", name=name, present=False)
+        return {"name": name, "present": False}
+
+    # ------------------------------------------------------------------- items
+
+    @app.get("/items", dependencies=guard)
+    async def read_items(
+        status: Optional[str] = Query(default=None),
+        limit: int = Query(default=200, ge=1, le=1000),
+        offset: int = Query(default=0, ge=0),
+    ) -> dict:
+        if status and status not in database.ALL_STATUS:
+            raise HTTPException(status_code=422, detail="unbekannter Status")
+        connection = database.connect()
+        try:
+            return {
+                "items": database.items(connection, status=status, limit=limit, offset=offset),
+                "counts": database.counts(connection),
+            }
+        finally:
+            connection.close()
+
+    @app.get("/items/unclear", dependencies=guard)
+    async def read_unclear() -> dict:
+        connection = database.connect()
+        try:
+            return {
+                "items": database.items(connection, status=database.STATUS_UNCLEAR),
+                "open_dispatches": database.open_dispatches(connection),
+            }
+        finally:
+            connection.close()
+
+    # ------------------------------------------------------------------ stream
 
     @app.websocket("/events")
-    async def events(websocket: WebSocket, token_param: str = Query(alias="token"),
-                     after: int = Query(default=0)) -> None:
+    async def events(
+        websocket: WebSocket,
+        token_param: str = Query(alias="token"),
+        after: int = Query(default=0),
+    ) -> None:
         if not hmac.compare_digest(token_param, token):
             await websocket.close(code=4401)
             return

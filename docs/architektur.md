@@ -34,3 +34,31 @@ einer Seite eine Rolle tragen, wie sie erkannt werden, welche Zustände es gibt,
 welche Aktionskette ein Zustand auslöst, alle Adressen und Textwerte.
 
 Im Code steht keine Adresse, kein Selektor und kein Textinhalt einer Zielseite.
+
+## Ablage (Phase 1)
+
+| Inhalt | Ort | Bemerkung |
+|---|---|---|
+| Einstellungen | `%APPDATA%\Zahnputztracker\config.json` | eine Datei, atomar geschrieben, geprüft beim Lesen |
+| Datenbank | `%APPDATA%\Zahnputztracker\data.sqlite` | führende Datenquelle, WAL-Modus |
+| Geheimnisse | Windows-Anmeldeinformationsspeicher | nur setzen, löschen, abfragen ob vorhanden |
+
+Die Oberfläche kann ein Geheimnis nie zurücklesen. Erlaubt sind ausschließlich
+die zwei Namen `account-password` und `composer-api-key`; alles andere wird
+abgewiesen.
+
+## Statuswerte
+
+| Status | Bedeutung | gilt als erledigt |
+|---|---|---|
+| `offen` | gesehen, noch nicht bearbeitet (intern) | nein |
+| `kontaktiert` | Versand bestätigt | ja |
+| `unklar` | Versand ausgelöst, Bestätigung fehlt | ja (nur der Benutzer entscheidet) |
+| `uebersprungen` | Ausschluss erkannt, mit Grund | ja |
+| `bereits_angefragt` | von der Seite als erledigt gemeldet | ja |
+| `fehlgeschlagen` | Fehler, mit Verweis auf den Vorfall | nein |
+| `wartet_auf_freigabe` | Testmodus, noch nicht entschieden | nein |
+
+Beim Start prüft der Dienst die Tabelle `dispatch`. Ein Vermerk ohne Bestätigung
+bedeutet Absturz zwischen Versand und Bestätigung: der Eintrag wandert auf
+`unklar`, nie auf `kontaktiert`, und wird nie von selbst erneut versendet.

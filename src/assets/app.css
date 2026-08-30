@@ -17,3 +17,12 @@ button {
   border: 1px solid var(--line); border-radius: 6px; padding: 6px 12px; cursor: pointer;
 }
 button:hover { border-color: #3a414c; }
+
+input, select, textarea {
+  font: inherit; color: inherit; background: #12141a;
+  border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; width: 100%;
+}
+input:focus, select:focus, textarea:focus { outline: none; border-color: #4a5361; }
+input[type="checkbox"] { width: auto; }
+textarea { resize: vertical; font-family: inherit; }
+button:disabled { opacity: 0.45; cursor: default; }

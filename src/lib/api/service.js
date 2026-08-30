@@ -1,14 +1,11 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { pushEvent, serviceStatus } from "../stores/service.js";
+import { endpoint, request } from "./client.js";
 
 let socket = null;
 let lastSeq = 0;
 let reconnectTimer = null;
-
-async function endpoint() {
-  return await invoke("service_endpoint");
-}
 
 /** Baut den Ereignisstrom auf und hält ihn offen. */
 async function connectStream() {
@@ -53,25 +50,19 @@ export async function initService() {
   if (current.state === "verbunden") await connectStream();
 }
 
-export async function health() {
-  const { port, token } = await endpoint();
-  const response = await fetch(`http://127.0.0.1:${port}/health`, {
-    headers: { "X-Auth-Token": token }
-  });
-  if (!response.ok) throw new Error(`HTTP ${response.status}`);
-  return await response.json();
-}
+export const health = () => request("/health");
+export const sendPing = () => request("/ping", { method: "POST" });
+export const restartService = () => invoke("service_restart");
 
-export async function sendPing() {
-  const { port, token } = await endpoint();
-  const response = await fetch(`http://127.0.0.1:${port}/ping`, {
-    method: "POST",
-    headers: { "X-Auth-Token": token }
-  });
-  if (!response.ok) throw new Error(`HTTP ${response.status}`);
-  return await response.json();
-}
+export const ladeEinstellungen = () => request("/config");
+export const speichereEinstellungen = (daten) =>
+  request("/config", { method: "PUT", body: daten });
 
-export async function restartService() {
-  return await invoke("service_restart");
-}
+export const ladeGeheimnisse = () => request("/secrets");
+export const setzeGeheimnis = (name, wert) =>
+  request(`/secrets/${name}`, { method: "PUT", body: { value: wert } });
+export const loescheGeheimnis = (name) => request(`/secrets/${name}`, { method: "DELETE" });
+
+export const ladeEintraege = (status) =>
+  request(`/items${status ? `?status=${encodeURIComponent(status)}` : ""}`);
+export const ladeUnklare = () => request("/items/unclear");
