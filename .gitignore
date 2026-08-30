@@ -1,0 +1,25 @@
+privat/
+
+# node
+node_modules/
+dist/
+.vite/
+
+# rust
+src-tauri/target/
+
+# python
+__pycache__/
+*.py[cod]
+.venv/
+build/
+service_dist/
+*.spec
+
+# editors / os
+.DS_Store
+Thumbs.db
+.vscode/
+
+# tauri generated
+src-tauri/gen/schemas/
