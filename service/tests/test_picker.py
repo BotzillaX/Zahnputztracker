@@ -239,7 +239,25 @@ async def main():
         )
         check(auf_kopie.found, "der Picker findet Rollen auch auf der Kopie")
         check(len(catalog.views("search")) == 2, "eine geoeffnete Kopie kommt nicht in den Katalog")
+
+        # Die Sperre darf nicht haengen bleiben: der naechste Aufruf einer
+        # Adresse hebt sie auf, sonst waere der Browser danach taub.
+        ziel_kopie = gesichert.as_uri()
+        erreicht = await instanz.navigate(ziel_kopie, 20)
+        check(erreicht == ziel_kopie, "nach der Kopie ist der Browser wieder ansprechbar")
         await snapshot_view.release(seite)
+
+        # Signatur: die Anzahl der Eintraege darf keine neue Ansicht ergeben.
+        gerippe = "<html><body><main>%s<button>Weiter</button></main></body></html>"
+        eintrag = "<div class='k' data-item='x'><h2>t</h2></div>"
+        await seite.set_content(gerippe % (eintrag * 3))
+        wenige = await seite.evaluate("() => window.__ztOverlay.signature()")
+        await seite.set_content(gerippe % (eintrag * 17))
+        viele = await seite.evaluate("() => window.__ztOverlay.signature()")
+        check(wenige == viele, "mehr Eintraege ergeben dieselbe Ansicht")
+        await seite.set_content(gerippe % (eintrag * 3 + "<select><option>a</option></select>"))
+        anders = await seite.evaluate("() => window.__ztOverlay.signature()")
+        check(anders != wenige, "eine andere Art von Element ergibt eine andere Ansicht")
     finally:
         await instanz.close()
         await playwright.stop()

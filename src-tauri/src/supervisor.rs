@@ -36,6 +36,58 @@ pub struct Endpoint {
 #[derive(Deserialize)]
 struct RuntimeFile {
     port: u16,
+    #[serde(default)]
+    pid: u32,
+}
+
+#[derive(Deserialize)]
+struct Health {
+    #[serde(default)]
+    build: String,
+}
+
+/// What the service must report so that we may adopt it. In a
+/// development build this is the state of the service sources: adopting
+/// a service that still runs yesterday's code looks like the program
+/// ignoring every change, and costs an hour before anybody suspects the
+/// right thing.
+fn expected_build() -> String {
+    if cfg!(debug_assertions) {
+        let project = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("project root")
+            .to_path_buf();
+        source_stamp(&project.join("service"))
+    } else {
+        env!("CARGO_PKG_VERSION").to_string()
+    }
+}
+
+/// Newest change time below a directory, as a plain number.
+fn source_stamp(dir: &std::path::Path) -> String {
+    fn newest(dir: &std::path::Path, best: &mut u64) {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                if path.file_name().is_some_and(|n| n == "__pycache__") {
+                    continue;
+                }
+                newest(&path, best);
+            } else if let Ok(meta) = entry.metadata() {
+                if let Ok(time) = meta.modified() {
+                    if let Ok(age) = time.duration_since(std::time::UNIX_EPOCH) {
+                        *best = (*best).max(age.as_secs());
+                    }
+                }
+            }
+        }
+    }
+    let mut best = 0u64;
+    newest(dir, &mut best);
+    best.to_string()
 }
 
 pub struct Supervisor {
@@ -88,34 +140,75 @@ fn token() -> String {
 }
 
 fn runtime_file() -> PathBuf {
+    app_dir().join("runtime.json")
+}
+
+fn app_dir() -> PathBuf {
     let base = std::env::var("APPDATA").unwrap_or_default();
-    PathBuf::from(base).join("Zahnputztracker").join("runtime.json")
+    PathBuf::from(base).join("Zahnputztracker")
+}
+
+/// Where the error output of the service is kept, so a crash leaves a
+/// readable trace instead of a blocked pipe.
+fn log_file() -> PathBuf {
+    let logs = app_dir().join("logs");
+    let _ = std::fs::create_dir_all(&logs);
+    logs.join("dienst-fehler.log")
 }
 
 /// Ask a candidate port whether our service is listening there.
-/// Returns Ok(true) when the token is accepted.
-fn probe(port: u16, token: &str) -> Result<bool, String> {
+/// Returns the reported build when the token is accepted.
+fn probe(port: u16, token: &str) -> Result<Option<String>, String> {
     let url = format!("http://127.0.0.1:{port}/health");
     match ureq::get(&url)
         .set("X-Auth-Token", token)
         .timeout(Duration::from_secs(2))
         .call()
     {
-        Ok(_) => Ok(true),
-        Err(ureq::Error::Status(401, _)) => Ok(false),
+        Ok(response) => {
+            let health: Health = response.into_json().map_err(|e| e.to_string())?;
+            Ok(Some(health.build))
+        }
+        Err(ureq::Error::Status(401, _)) => Ok(None),
         Err(ureq::Error::Status(code, _)) => Err(format!("HTTP {code}")),
         Err(e) => Err(e.to_string()),
     }
 }
 
 /// Re-attach to a service that survived a restart of the user interface.
+/// Only a service built from the same sources is adopted.
 fn attach(token: &str) -> Option<u16> {
     let raw = std::fs::read_to_string(runtime_file()).ok()?;
     let parsed: RuntimeFile = serde_json::from_str(&raw).ok()?;
     match probe(parsed.port, token) {
-        Ok(true) => Some(parsed.port),
+        Ok(Some(build)) if build == expected_build() => Some(parsed.port),
+        Ok(Some(_)) => {
+            // Same protocol, older code. Out of the way with it.
+            stop_stale();
+            None
+        }
         _ => None,
     }
+}
+
+/// End a service that we do not hold as a child process: adopted from an
+/// earlier run, or left over after a crash. Without this the watchdog
+/// would start a new one, which would find the old one and give up.
+fn stop_stale() {
+    let Ok(raw) = std::fs::read_to_string(runtime_file()) else {
+        return;
+    };
+    let Ok(parsed) = serde_json::from_str::<RuntimeFile>(&raw) else {
+        return;
+    };
+    if parsed.pid == 0 {
+        return;
+    }
+    let mut command = Command::new("taskkill");
+    command.args(["/PID", &parsed.pid.to_string(), "/F"]);
+    hide_console(&mut command);
+    let _ = command.status();
+    let _ = std::fs::remove_file(runtime_file());
 }
 
 /// Command line of the service. In development the project virtual
@@ -170,6 +263,24 @@ fn spawn(app: &AppHandle, token: &str) -> Result<(u16, Child), String> {
         .write_all(format!("{token}\n").as_bytes())
         .map_err(|e| e.to_string())?;
 
+    // The error channel has to be read as well. A pipe that nobody
+    // empties fills up after about 64 KB and then the service blocks on
+    // its next line of output, silently and for good.
+    if let Some(stderr) = child.stderr.take() {
+        std::thread::spawn(move || {
+            let mut file = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(log_file())
+                .ok();
+            for line in BufReader::new(stderr).lines().map_while(Result::ok) {
+                if let Some(handle) = file.as_mut() {
+                    let _ = writeln!(handle, "{line}");
+                }
+            }
+        });
+    }
+
     let stdout = child.stdout.take().ok_or("kein Ausgabekanal")?;
     let mut reader = BufReader::new(stdout);
     let mut line = String::new();
@@ -194,7 +305,11 @@ fn spawn(app: &AppHandle, token: &str) -> Result<(u16, Child), String> {
         }
         Some("already_running") => {
             let _ = child.kill();
-            Err("Dienst laeuft bereits, konnte aber nicht uebernommen werden".into())
+            let _ = child.wait();
+            // An older or foreign service is holding the place. It is
+            // ended here, the next round of the watchdog starts cleanly.
+            stop_stale();
+            Err("Alter Dienst wurde beendet, Neustart folgt".into())
         }
         _ => {
             let _ = child.kill();
@@ -239,7 +354,7 @@ pub fn launch(app: AppHandle) {
                     }
                 }
                 Some(endpoint) => match probe(endpoint.port, &endpoint.token) {
-                    Ok(true) => {
+                    Ok(Some(_)) => {
                         if failures > 0 {
                             failures = 0;
                             supervisor.publish(&app, "verbunden", "");
@@ -254,10 +369,7 @@ pub fn launch(app: AppHandle) {
                                 "Dienst antwortet nicht, Neustart",
                             );
                             *supervisor.endpoint.lock().unwrap() = None;
-                            if let Some(mut child) = supervisor.child.lock().unwrap().take() {
-                                let _ = child.kill();
-                                let _ = child.wait();
-                            }
+                            stop(&supervisor);
                             failures = 0;
                         }
                     }
@@ -271,8 +383,19 @@ pub fn launch(app: AppHandle) {
 /// Force a restart: the watchdog picks the service up again immediately.
 pub fn restart(supervisor: &Supervisor) {
     *supervisor.endpoint.lock().unwrap() = None;
-    if let Some(mut child) = supervisor.child.lock().unwrap().take() {
-        let _ = child.kill();
-        let _ = child.wait();
+    stop(supervisor);
+}
+
+/// End the running service, whether we started it or adopted it.
+fn stop(supervisor: &Supervisor) {
+    let child = supervisor.child.lock().unwrap().take();
+    match child {
+        Some(mut child) => {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+        // Nothing of ours: it was adopted, so it is ended over its
+        // process id from the runtime file.
+        None => stop_stale(),
     }
 }

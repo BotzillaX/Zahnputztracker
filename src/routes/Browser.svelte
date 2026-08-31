@@ -64,6 +64,9 @@
 
 {#if !zustand}
   <p class="muted">Browser-Zustand wird geladen …</p>
+  <!-- Ohne diese Zeile bleibt ein Fehler beim ersten Laden unsichtbar
+       und die Ansicht sieht aus, als wuerde sie ewig laden. -->
+  {#if fehler}<p class="bad">{fehler}</p>{/if}
 {:else}
   <div class="seite">
     <section>

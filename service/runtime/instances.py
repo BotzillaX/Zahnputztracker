@@ -292,6 +292,10 @@ class Instance:
         if self.page is None:
             raise BrowserError(f"{ROLE_LABELS[self.role]} läuft nicht")
         self.next_trigger = "Adresszeile"
+        # A saved copy is shown with the network cut off. Going somewhere
+        # else ends that state, otherwise the next address would be
+        # refused by our own barrier.
+        await self.page.unroute("**/*")
         await self.page.goto(url, timeout=timeout_s * 1000, wait_until="domcontentloaded")
         return self.page.url
 
@@ -331,7 +335,10 @@ class Fleet:
 
     async def start(self, browsers_config: Dict[str, Any]) -> Dict[str, Any]:
         async with self._lock:
-            if self.running:
+            # Only what is not running is started. After a start where
+            # one of the two failed, a second attempt must be able to
+            # repair that instead of reporting "runs already".
+            if all(instance.context is not None for instance in self.instances.values()):
                 return self.snapshot()
             executable = browser_install.executable()
             if executable is None:
@@ -344,9 +351,11 @@ class Fleet:
                 if self._playwright is None:
                     self._playwright = await async_playwright().start()
                 for role in ROLES:
+                    instance = self.instances[role]
+                    if instance.context is not None:
+                        continue
                     size = browsers_config.get(role, {})
                     before = _running_pids(executable)
-                    instance = self.instances[role]
                     try:
                         await instance.start(
                             self._playwright,

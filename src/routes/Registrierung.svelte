@@ -28,6 +28,7 @@
   let versionen = $state([]);
   let picker = $state({ active: false, scope: "", pick: null });
   let pruefung = $state(null);
+  let letzteSerie = $state(0);
   let meldung = $state("");
   let fehler = $state("");
   let beschaeftigt = $state("");
@@ -71,9 +72,13 @@
 
   async function pickerStand() {
     try {
-      const vorher = picker.pick;
       picker = await ladePicker();
-      if (picker.pick && picker.pick !== vorher && picker.pick.scope === bereich) {
+      // Nur eine wirklich neue Auswahl bereitet das Panel neu vor. Die
+      // Antwort des Dienstes ist bei jedem Takt ein neues Objekt, ein
+      // Vergleich der Objekte wuerde die Eingaben staendig loeschen.
+      const serie = picker.pick?.serial ?? 0;
+      if (serie && serie !== letzteSerie && picker.pick.scope === bereich) {
+        letzteSerie = serie;
         await panelVorbereiten();
       }
     } catch (e) {
@@ -197,6 +202,7 @@
 
 {#if !dokument}
   <p class="muted">Registrierung wird geladen …</p>
+  {#if fehler}<p class="bad">{fehler}</p>{/if}
 {:else}
   <div class="seite">
     <section>

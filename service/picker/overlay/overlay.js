@@ -266,23 +266,22 @@
 
   /**
    * Structural signature of the current view: which kinds of elements
-   * are visible, not what they say. Two views with the same structure
-   * count as the same view even if the texts differ.
+   * are visible, not what they say and not how many of them there are.
+   *
+   * The number is left out on purpose. A list with twenty entries and
+   * the same list with twenty-one is the same view; counting would make
+   * every reload a new one and bury the catalogue in copies.
    */
   function signature() {
-    const counted = new Map();
+    const parts = new Set();
     for (const node of Array.from(document.querySelectorAll("*"))) {
       if (own(node) || !visible(node)) continue;
       const data = dataAttributes(node)
         .map((entry) => entry.name)
         .join(",");
-      const part = `${node.tagName.toLowerCase()}|${ariaRole(node)}|${data}`;
-      counted.set(part, (counted.get(part) || 0) + 1);
+      parts.add(`${node.tagName.toLowerCase()}|${ariaRole(node)}|${data}`);
     }
-    return Array.from(counted.entries())
-      .sort((a, b) => (a[0] < b[0] ? -1 : 1))
-      .map(([part, count]) => `${part}#${count}`)
-      .join("\n");
+    return Array.from(parts).sort().join("\n");
   }
 
   /** Document copy without a trace of this overlay. */

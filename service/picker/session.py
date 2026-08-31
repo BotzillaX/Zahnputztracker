@@ -30,6 +30,10 @@ class Picker:
         self.scope: str = ""
         self.active: bool = False
         self.pick: Optional[Dict[str, Any]] = None
+        # Counts up with every selection. The user interface needs a
+        # stable mark to tell a new selection from the same selection
+        # polled again: the answer object itself is rebuilt every time.
+        self.serial: int = 0
 
     # ---------------------------------------------------------- from the page
 
@@ -47,7 +51,13 @@ class Picker:
             return
         if kind == "pick":
             element = payload.get("element") or {}
-            self.pick = {"scope": scope, "element": element, "url": payload.get("url", "")}
+            self.serial += 1
+            self.pick = {
+                "scope": scope,
+                "serial": self.serial,
+                "element": element,
+                "url": payload.get("url", ""),
+            }
             self.active = False
             bus.publish(
                 "pick",
@@ -75,7 +85,12 @@ class Picker:
         return self.state()
 
     def state(self) -> Dict[str, Any]:
-        return {"active": self.active, "scope": self.scope, "pick": self.pick}
+        return {
+            "active": self.active,
+            "scope": self.scope,
+            "serial": self.serial,
+            "pick": self.pick,
+        }
 
 
 picker = Picker()

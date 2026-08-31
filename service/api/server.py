@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import hmac
 import os
+import sys
 import time
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -42,6 +43,36 @@ HEARTBEAT_SECONDS = 15.0
 _started_at = time.monotonic()
 
 
+_build: str = ""
+
+
+def build_stamp() -> str:
+    """Which state of the code this service is running.
+
+    The host process compares this with what it expects and refuses to
+    adopt a service that still runs older code. Running from source that
+    is the newest change time below the package; as a packaged program
+    the sources cannot change, so the version is enough.
+    """
+    global _build
+    if _build:
+        return _build
+    if getattr(sys, "frozen", False):
+        _build = __version__
+        return _build
+    root = Path(__file__).resolve().parent.parent
+    newest = 0
+    for entry in root.rglob("*"):
+        if "__pycache__" in entry.parts or not entry.is_file():
+            continue
+        try:
+            newest = max(newest, int(entry.stat().st_mtime))
+        except OSError:
+            continue
+    _build = str(newest)
+    return _build
+
+
 def create_app(token: str) -> FastAPI:
     app = FastAPI(title="local service", version=__version__, docs_url=None, redoc_url=None)
 
@@ -67,6 +98,7 @@ def create_app(token: str) -> FastAPI:
         return {
             "status": "ok",
             "version": __version__,
+            "build": build_stamp(),
             "pid": os.getpid(),
             "uptime_s": round(time.monotonic() - _started_at, 1),
             "listeners": bus.subscriber_count,
@@ -390,7 +422,7 @@ def create_app(token: str) -> FastAPI:
             else:
                 file = atlas.catalog.snapshot_file(str(body.get("from") or scope), view)
             opened = await snapshot_view.open_on(instance.page, file)
-        except FileNotFoundError as error:
+        except (FileNotFoundError, ValueError) as error:
             raise HTTPException(status_code=404, detail=str(error)) from error
         except Exception as error:  # noqa: BLE001
             raise HTTPException(status_code=502, detail=str(error)) from error
@@ -426,13 +458,16 @@ def create_app(token: str) -> FastAPI:
         scope = registry_scope(scope)
         try:
             return FileResponse(atlas.catalog.screenshot_file(scope, view))
-        except FileNotFoundError as error:
+        except (FileNotFoundError, ValueError) as error:
             raise HTTPException(status_code=404, detail=str(error)) from error
 
     @app.delete("/atlas/{scope}/{view}", dependencies=guard)
     async def atlas_forget(scope: str, view: str) -> dict:
         scope = registry_scope(scope)
-        atlas.forget(scope, view)
+        try:
+            atlas.forget(scope, view)
+        except ValueError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
         return {"removed": view}
 
     # ------------------------------------------------------------------ stream

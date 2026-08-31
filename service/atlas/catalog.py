@@ -17,6 +17,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
@@ -28,6 +29,17 @@ from ..storage import paths
 # How many different arrivals are remembered per view. Enough to see the
 # ways in, small enough to stay readable.
 MAX_ARRIVALS = 20
+
+# Upper bound per instance. A page that keeps producing new structures
+# must not fill the disk without anybody noticing. Reaching the bound is
+# reported; known views keep counting.
+MAX_VIEWS = 200
+
+# Both parts of the path come from the outside (from the address of a
+# request). They are checked before they touch the filesystem, so a name
+# can never reach out of the catalogue directory.
+_SCOPES = ("search", "session")
+_DIGEST = re.compile(r"^[0-9a-f]{8,32}$")
 
 
 def root() -> Path:
@@ -43,7 +55,18 @@ def _digest(signature: str) -> str:
 
 
 def _view_dir(scope: str, digest: str) -> Path:
+    if scope not in _SCOPES:
+        raise ValueError("unbekannte Browser-Instanz")
+    if not _DIGEST.match(digest or ""):
+        raise ValueError("unbekannte Ansicht")
     return root() / scope / digest
+
+
+def _count_views(scope: str) -> int:
+    folder = root() / scope
+    if not folder.is_dir():
+        return 0
+    return sum(1 for entry in folder.iterdir() if (entry / "meta.json").is_file())
 
 
 def _write_json(target: Path, data: Dict[str, Any]) -> None:
@@ -90,6 +113,10 @@ async def capture(page: Any, scope: str, trigger: str = "Navigation") -> Optiona
         _write_json(meta_file, meta)
         bus.publish("view_seen", scope=scope, view=digest, count=meta["count"])
         return meta
+
+    if _count_views(scope) >= MAX_VIEWS:
+        bus.publish("view_limit", scope=scope, limit=MAX_VIEWS)
+        return {"view": digest, "scope": scope, "url": url, "stored": False, "count": 0}
 
     folder.mkdir(parents=True, exist_ok=True)
     try:
@@ -161,6 +188,8 @@ def screenshot_file(scope: str, digest: str) -> Path:
 def forget(scope: str, digest: str) -> None:
     """Remove one view from the catalogue."""
     folder = _view_dir(scope, digest)
+    if folder.parent.parent != root():
+        raise ValueError("unbekannte Ansicht")
     if not folder.is_dir():
         return
     for entry in folder.iterdir():
