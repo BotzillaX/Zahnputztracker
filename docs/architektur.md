@@ -330,3 +330,133 @@ eigener Ordner: `bericht.md` (lesbare Zusammenfassung), `daten.json`,
 wichtigste Teil des Berichts ist die Liste der gefundenen und der erwarteten,
 aber nicht gefundenen Rollen. Bildsequenz, Trace-Archiv und Referenzwerte kommen
 mit der nächsten Ausbaustufe dazu.
+
+## Beobachtung: Messen, Schwellen, Aufzeichnen (Phase 6)
+
+Die Anwendung kann nicht beurteilen, ob ein Zustand fachlich falsch ist.
+Sie erkennt nur, dass ein Vorgang ungewöhnlich lange dauert oder gar nicht
+endet. Alles hier dient deshalb einem einzigen Zweck: einem Menschen später
+den Vergleich zwischen einem auffälligen und einem funktionierenden
+Durchlauf zu ermöglichen.
+
+### Vorgänge als Messpunkte
+
+Jede gemessene Handlung ist ein Vorgang mit festem Namen aus einer
+geschlossenen Liste (`service/telemetry/spans.py`). Namen werden nie zur
+Laufzeit zusammengesetzt, damit eine Statistik über Monate vergleichbar
+bleibt. Gemessen wird heute: `item.open`, `auth.check`, `auth.login`,
+`form.open`, `form.fill`, `compose.generate`, `submit.send`,
+`submit.confirm`, `state.detect`. Die vier `search.*`-Namen sind
+vorbereitet und werden mit dem Suchzyklus belegt.
+
+Anfang und Ende jedes Vorgangs gehen in zwei Richtungen: als Ereignis an
+die Oberfläche und als Zeile in die Tagesdatei unter
+`%APPDATA%\Zahnputztracker\logs\JJJJ-MM-TT.jsonl`. Jede Zeile ist für sich
+gültig, damit ein Absturz höchstens diese eine Zeile kostet.
+
+Solange eine Freigabe offen ist, steht die Uhr aller laufenden Vorgänge
+still. Sonst würde ein Mensch, der sich Zeit lässt, als Blockade gelten.
+
+### Referenzwerte
+
+Je Vorgangsname, Browser und Tagesstunde ein gleitendes Fenster der letzten
+200 Messungen, bewertet über Median und mittlere absolute Abweichung. Der
+Median ist gegen einzelne Ausreißer unempfindlich; ein einzelner Hänger
+vergiftet die Referenz also nicht. Hat eine Stunde noch zu wenige Werte,
+gilt der Gesamtwert des Browsers.
+
+Regeln, die bewusst so und nicht anders sind:
+
+- Die allererste Messung eines Vorgangs zählt nicht (kalter Start).
+- Bewertet wird erst ab acht Messungen, vorher wird nur gesammelt.
+- Auch auffällige Werte fließen ein, damit die Referenz dauerhaft
+  veränderten Bedingungen folgt.
+- Die Werte liegen in `stats\laufzeiten.json` und überleben einen Neustart.
+
+### Zwei Schwellen
+
+| Schwelle | Auslöser | Was passiert |
+|---|---|---|
+| weich | über dem Referenzbereich des Namens | Zustandserfassung, während der Vorgang noch hängt; Zyklus zur Speicherung vorgemerkt; der Ablauf läuft weiter |
+| hart | absolutes Zeitlimit je Name (Einstellungen) | zweite Erfassung in denselben Ordner, Bildfolge und Aufzeichnungen dazu, Benachrichtigung, Wiederherstellung |
+
+Die weiche Erfassung ist die wichtigere. Bis zum harten Limit hat die
+Zielseite oft schon eine eigene Fehlermeldung nachgeladen, sodass nur noch
+die Folge und nicht die Ursache sichtbar wäre. Der Vergleich beider
+Erfassungen zeigt, ob sich die Seite verändert hat oder unverändert
+stehen blieb.
+
+Beide Schwellen prüft ein eigener Wachhund im Sekundentakt gegen die
+laufenden Vorgänge, nicht gegen die beendeten. Der eigentliche Fehlerfall
+ist der Vorgang, der nie endet.
+
+### Aufzeichnungen
+
+Kein Dauervideo. Statt dessen drei Dinge:
+
+- **Bildfolge**: ein Bild alle zwei Sekunden, die letzten sechzig im
+  Arbeitsspeicher. Sie deckt die zwei Minuten vor einem Ereignis ab und
+  wird erst bei einer Schwelle auf die Platte geschrieben.
+- **Zyklus-Aufzeichnung**: jeder Vorgang (Anmeldung, Kontaktvorgang) wird
+  aufgezeichnet und wieder verworfen, sofern nichts daran auffällig war.
+  Auffällige Zyklen bleiben, zusammen mit den zwanzig davor.
+- **Referenzdurchlauf**: je Vorgangsname wird ein erfolgreicher Durchlauf
+  dauerhaft vorgehalten und in jeden passenden Vorfallsordner kopiert.
+  Damit ist ein Soll-Ist-Vergleich auch dann möglich, wenn der Fehler seit
+  Stunden anhält.
+
+Die Bildfolge fotografiert nie, während ein Vorgang auf der Seite
+arbeitet. Ein Bildschirmfoto hält die Seite kurz an, und ein Klick, der in
+diesen Moment fällt, wartet darauf. Eine Stoppuhr, die den Läufer
+gelegentlich stellt, wäre schlechter als eine Lücke in den Bildern; der
+Moment selbst wird ohnehin von den Erfassungen an den Schwellen
+festgehalten. Zusätzlich bekommt jedes Bild sein Zeitlimit im Browser
+selbst, nicht nur im Wartenden.
+
+### Ein Vorfallsordner
+
+Ein Ordner je Vorfall unter `%APPDATA%\Zahnputztracker\incidents\`, benannt
+nach Zeitpunkt und Vorgang:
+
+```
+bericht.md          lesbare Zusammenfassung, ohne Werkzeugkenntnis
+daten.json          alles Folgende als Daten
+bild.png            Bildschirmfoto der ersten Erfassung
+seite.html          Kopie der Seite (ohne Overlay, ohne Skripte)
+text.txt            sichtbarer Text
+stufe2-hart\        zweite Erfassung, gleiche Dateien
+bilder\             Bildfolge aus dem Ringpuffer
+aufzeichnung\       dieser Zyklus und die davor
+referenz\           letzter erfolgreicher Durchlauf desselben Vorgangs
+```
+
+Kern des Berichts ist nicht die Laufzeit, sondern die Liste der Rollen:
+welche gefunden wurden und welche erwartet, aber nicht gefunden. Das zeigt
+in der Regel schon ohne Öffnen einer Aufzeichnung, ob ein Layout geändert
+wurde, eine Abfrage dazwischenkam oder die Seite gar nicht geladen hat.
+
+### Wiederherstellung
+
+Vier Stufen in dieser Reihenfolge, dazwischen jeweils die Zustandsprüfung
+als Urteil: Zustand erneut prüfen, Seite neu laden, zur Startadresse
+zurückkehren, Anmeldung prüfen. Hält keine davon, wird angehalten und
+benachrichtigt. Ist noch kein Zustand angelernt, gilt als Erfolg nur, dass
+die Seite überhaupt antwortet; mehr wäre eine Behauptung ohne Grundlage.
+
+Die einzige Handlung, die nie automatisch wiederholt wird, ist das
+Absenden. War ein Versand offen, als die Wiederherstellung ansetzte, geht
+der Eintrag auf die Liste „Status unklar“ und wartet auf eine Entscheidung.
+
+### Speicher
+
+Aufbewahrung: Protokoll 30 Tage, Vorfälle 7 Tage, dazu eine harte
+Obergrenze für alle Aufzeichnungen (Vorbelegung 500 MB). Wird sie erreicht,
+werden die ältesten Aufzeichnungen gelöscht, bis es wieder passt. Diese
+Regel steht über allen anderen: die Anwendung darf wegen eines vollen
+Datenträgers nicht stehen bleiben.
+
+### Bericht
+
+Markdown ist Ausgabeformat, kein Speicherformat. Der Bericht wird auf
+Knopfdruck aus der Tagesdatei erzeugt und liegt unter `reports\`. Er lässt
+sich für jeden noch vorhandenen Tag erneut erzeugen.

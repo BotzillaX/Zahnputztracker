@@ -18,7 +18,7 @@ from ..engine.runner import EngineStop, element, role_visible, wait_for_role
 from ..registry import store as registry_store
 from ..storage import config as config_store
 from ..storage import secrets
-from ..telemetry import incidents
+from ..telemetry import incidents, notify, spans
 from . import contract
 
 # How often the whole procedure is tried before it stops (7.1.5).
@@ -39,7 +39,8 @@ async def state(instance: Any) -> Dict[str, Any]:
         return {"known": False, "signed_in": False,
                 "reason": f"Die Rolle '{contract.LABELS[contract.SIGNED_IN]}' ist nicht angelernt"}
     try:
-        visible = await role_visible(instance.page, document, contract.SIGNED_IN)
+        async with spans.span("auth.check", instance=instance):
+            visible = await role_visible(instance.page, document, contract.SIGNED_IN)
     except EngineStop as error:
         return {"known": False, "signed_in": False, "reason": str(error)}
     return {"known": True, "signed_in": visible, "reason": ""}
@@ -47,6 +48,7 @@ async def state(instance: Any) -> Dict[str, Any]:
 
 async def _ask_for_code(instance: Any) -> str:
     bus.publish("code_wanted", scope=instance.role)
+    notify.notify(notify.CODE, "Der Zugang verlangt einen Code.", scope=instance.role)
     answer = await gate.ask(
         {
             "mode": "code",
@@ -122,7 +124,9 @@ async def sign_in(instance: Any) -> Dict[str, Any]:
     for attempt in range(1, MAX_ATTEMPTS + 1):
         bus.publish("sign_in_started", scope=instance.role, attempt=attempt)
         try:
-            if await _attempt(instance, document, limit):
+            async with spans.span("auth.login", instance=instance, attempt=attempt):
+                done = await _attempt(instance, document, limit)
+            if done:
                 bus.publish("sign_in_done", scope=instance.role, attempt=attempt)
                 return {"signed_in": True, "attempts": attempt, "already": False}
             reason = "Nach der Anmeldung ist das Merkmal nicht erschienen"
@@ -135,6 +139,8 @@ async def sign_in(instance: Any) -> Dict[str, Any]:
         )
         bus.publish("sign_in_failed", scope=instance.role, attempt=attempt,
                     reason=reason, incident=incident)
+        notify.notify(notify.AUTH, f"Anmeldeversuch {attempt}: {reason}",
+                      scope=instance.role, incident=incident)
 
     raise SignInError(
         f"Die Anmeldung ist {MAX_ATTEMPTS} mal nicht gelungen. Die Anwendung hält an."

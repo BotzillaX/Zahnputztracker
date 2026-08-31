@@ -16,6 +16,7 @@ from ..api.events import bus
 from ..registry import model
 from ..registry import resolve as registry_resolve
 from ..registry import store as registry_store
+from ..telemetry import notify, spans
 from ..registry.resolve import UnknownState
 from ..storage import config as config_store
 from ..storage import database, secrets
@@ -340,7 +341,8 @@ async def run_once(instance: Any, scope: str, rounds: int = MAX_ROUNDS) -> Dict[
     for _ in range(max(1, rounds)):
         document = registry_store.load(scope)
         try:
-            detection = await state_detection.detect(instance.page, document)
+            async with spans.span("state.detect", instance=instance):
+                detection = await state_detection.detect(instance.page, document)
         except UnknownState as error:
             return _stopped(report, str(error), "unknown_state", scope)
         if detection.chosen is None:
@@ -360,6 +362,10 @@ def _stopped(report: Dict[str, Any], reason: str, kind: str, scope: str) -> Dict
     report["stopped"] = reason
     report["kind"] = kind
     bus.publish("engine_stopped", scope=scope, reason=reason, stop=kind)
+    if kind == "unknown_state":
+        # An unknown state is one of the six cases worth a system
+        # message (12.5): nothing happens until a person looks.
+        notify.notify(notify.UNKNOWN_STATE, reason, scope=scope)
     return report
 
 

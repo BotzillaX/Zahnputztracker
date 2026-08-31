@@ -164,3 +164,17 @@ export const entscheideEintrag = (kennung, entscheidung) =>
 export const ladeVorfaelle = () => request("/incidents");
 export const ladeVorfall = (kennung) => request(`/incidents/${kennung}`);
 export const vergissVorfall = (kennung) => request(`/incidents/${kennung}`, { method: "DELETE" });
+
+export const ladeDiagnose = () => request("/diagnose");
+export const ladeLaufzeiten = () => request("/diagnose/stats");
+export const ladeProtokoll = (anzahl) => request(`/diagnose/log?count=${anzahl ?? 200}`);
+export const ladeSpeicher = () => request("/diagnose/storage");
+export const raeumeAuf = () => request("/diagnose/cleanup", { method: "POST" });
+export const ladeBerichte = () => request("/diagnose/reports");
+export const erzeugeBericht = (tag) =>
+  request("/diagnose/report", { method: "POST", body: { day: tag ?? "" } });
+export const halteVorgangAn = (name, sekunden, bereich) =>
+  request("/diagnose/probe", {
+    method: "POST",
+    body: { name, seconds: sekunden, scope: bereich }
+  });

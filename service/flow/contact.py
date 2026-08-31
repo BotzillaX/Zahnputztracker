@@ -31,7 +31,7 @@ from ..engine.runner import (
 from ..registry import store as registry_store
 from ..storage import config as config_store
 from ..storage import database, paths
-from ..telemetry import incidents
+from ..telemetry import incidents, spans
 from ..text import ComposerError, build, generate
 from ..text.prompt import PromptError
 from . import contract
@@ -217,11 +217,11 @@ async def contact(instance: Any, key: str, url: str, title: str = "") -> Dict[st
     try:
         # 1 and 2: the address is opened, never a link that is clicked.
         limit = float(settings["limits"].get("item.open", 60))
-        await instance.navigate(url, limit)
-
-        # 3: wait for the page to be ready.
         try:
-            await wait_for_role(page, document, contract.READY_MARKER, limit, True)
+            async with spans.span("item.open", instance=instance, key=key):
+                await instance.navigate(url, limit)
+                # 3: wait for the page to be ready.
+                await wait_for_role(page, document, contract.READY_MARKER, limit, True)
         except EngineStop as error:
             return await failed("eintrag_oeffnen", str(error), database.STATUS_FAILED)
 
@@ -264,35 +264,32 @@ async def contact(instance: Any, key: str, url: str, title: str = "") -> Dict[st
         try:
             prompt, _ = build(settings["composer"].get("prompt", ""), settings,
                               page_text, url=url, title=title)
-            text = await generate(prompt, settings["composer"])
+            async with spans.span("compose.generate", instance=instance, key=key):
+                text = await generate(prompt, settings["composer"])
         except (ComposerError, PromptError) as error:
             return await failed("anschreiben", str(error), database.STATUS_FAILED)
         result["text"] = text
         bus.publish("text_generated", key=key, characters=len(text))
 
-        # 8: open the form.
-        if contract.taught(known.get(contract.OPEN_FORM)):
-            try:
-                await (await element(page, document, contract.OPEN_FORM)).click()
-            except EngineStop as error:
-                return await failed("formular_oeffnen", str(error), database.STATUS_FAILED)
-
-        # 9: no message field means the entry is gone. Not a failure, and
-        # explicitly not "contacted".
+        # 8 and 9: open the form. No message field means the entry is
+        # gone. Not a failure, and explicitly not "contacted".
         form_limit = float(settings["limits"].get("form.open", 45))
         try:
-            await wait_for_role(page, document, contract.MESSAGE_FIELD, form_limit, True)
+            async with spans.span("form.open", instance=instance, key=key):
+                if contract.taught(known.get(contract.OPEN_FORM)):
+                    await (await element(page, document, contract.OPEN_FORM)).click()
+                await wait_for_role(page, document, contract.MESSAGE_FIELD, form_limit, True)
         except EngineStop:
             return await stop(database.STATUS_SKIPPED, "Nicht mehr verfügbar")
 
-        # 10: fill in.
-        await (await element(page, document, contract.MESSAGE_FIELD)).fill(text)
-        planned = await _planned_fields(page, document, settings)
-        result["fields"] = planned
-        await _fill_fields(page, document, planned, settings)
-
-        # 11: scrolling is not optional (8.3).
-        await (await element(page, document, contract.SUBMIT_ACTION)).scroll_into_view_if_needed()
+        # 10 and 11: fill in, and scrolling is not optional (8.3).
+        async with spans.span("form.fill", instance=instance, key=key):
+            await (await element(page, document, contract.MESSAGE_FIELD)).fill(text)
+            planned = await _planned_fields(page, document, settings)
+            result["fields"] = planned
+            await _fill_fields(page, document, planned, settings)
+            await (await element(page, document,
+                                contract.SUBMIT_ACTION)).scroll_into_view_if_needed()
 
         # Second approval of the test mode: the finished text, before it
         # goes anywhere.
@@ -314,10 +311,12 @@ async def contact(instance: Any, key: str, url: str, title: str = "") -> Dict[st
         finally:
             connection.close()
         bus.publish("dispatch_started", key=key)
-        await (await element(page, document, contract.SUBMIT_ACTION)).click()
+        async with spans.span("submit.send", instance=instance, key=key):
+            await (await element(page, document, contract.SUBMIT_ACTION)).click()
 
         # 13: confirmation.
-        how = await _confirmed(instance, document, settings)
+        async with spans.span("submit.confirm", instance=instance, key=key):
+            how = await _confirmed(instance, document, settings)
         if not how:
             # The click happened. Whether it arrived is unknown, so this
             # is not a failure that may be repeated on its own (8.4).

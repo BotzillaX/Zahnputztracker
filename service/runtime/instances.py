@@ -21,6 +21,7 @@ import psutil
 
 from .. import atlas
 from ..api.events import bus
+from ..telemetry import frames, tracing
 from ..picker import OVERLAY_SOURCE
 from ..picker.session import BINDING, picker
 from ..storage import paths
@@ -165,6 +166,9 @@ class Instance:
         if self.role == SESSION and not reused:
             self._remember_options(options)
 
+        # The ring buffer keeps the last two minutes of this window in
+        # memory, so a threshold has something to show (6.3).
+        frames.attach(self)
         bus.publish("browser_started", role=self.role, pid=self.pid)
 
     @staticmethod
@@ -255,13 +259,16 @@ class Instance:
         context, self.context, self.page = self.context, None, None
         self.pid = None
         self.pids = []
+        await frames.detach(self.role)
         if context is not None:
+            tracing.forget_context(context)
             try:
                 await context.close()
             except Exception:  # noqa: BLE001 - a dead browser is closed enough
                 pass
 
     def _forget(self, *_: Any) -> None:
+        asyncio.ensure_future(frames.detach(self.role))
         self.context = None
         self.page = None
         self.pid = None

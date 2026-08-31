@@ -5,13 +5,12 @@
     entscheideEintrag,
     ladeAblauf,
     ladeAnmeldestand,
+    ladeDiagnose,
     ladeEintraege,
     ladeUnklare,
-    ladeVorfaelle,
     restartService,
     starteAnmeldung,
-    starteVorgang,
-    vergissVorfall
+    starteVorgang
   } from "../lib/api/service.js";
   import { events } from "../lib/stores/service.js";
 
@@ -19,7 +18,7 @@
   let anmeldung = $state(null);
   let bestand = $state(null);
   let unklar = $state(null);
-  let vorfaelle = $state([]);
+  let diagnose = $state(null);
   let adresse = $state("");
   let titel = $state("");
   let filter = $state("");
@@ -40,7 +39,7 @@
       ablauf = await ladeAblauf();
       bestand = await ladeEintraege(filter || undefined);
       unklar = await ladeUnklare();
-      vorfaelle = (await ladeVorfaelle()).incidents;
+      diagnose = await ladeDiagnose();
     } catch (e) {
       fehler = String(e.message ?? e);
     }
@@ -77,7 +76,11 @@
   const entscheiden = (kennung, entscheidung) =>
     fuehreAus("entscheiden", () => entscheideEintrag(kennung, entscheidung));
 
-  const vorfallWeg = (kennung) => fuehreAus("vorfall", () => vergissVorfall(kennung));
+  const statusfarbe = (stufe) =>
+    stufe === "blockiert" ? "var(--bad)" : stufe === "auffaellig" ? "var(--warn)" : "var(--ok)";
+
+  const stufenfarbe = (stufe) =>
+    stufe === "kritisch" ? "var(--bad)" : stufe === "erhoeht" ? "var(--warn)" : "var(--muted)";
 
   async function filterWechseln(wert) {
     filter = wert;
@@ -206,30 +209,37 @@
     </section>
   {/if}
 
-  <section>
-    <h2>Vorfälle</h2>
-    {#if vorfaelle.length === 0}
-      <p class="muted klein">Kein Vorfall aufgezeichnet.</p>
-    {:else}
-      {#each vorfaelle.slice(0, 10) as vorfall}
-        <div class="karte">
-          <div class="zeile">
-            <div>
-              <strong>{vorfall.operation}</strong>
-              <span class="muted klein">{vorfall.reason}</span>
-            </div>
-            <div class="knoepfe">
-              <span class="muted klein">{vorfall.missing} Rolle(n) nicht gefunden</span>
-              <button onclick={() => vorfallWeg(vorfall.incident)}>vergessen</button>
-            </div>
-          </div>
-          <p class="muted klein">
-            {vorfall.at?.slice(0, 19).replace("T", " ")} · {vorfall.incident}
-          </p>
-        </div>
-      {/each}
-    {/if}
-  </section>
+  {#if diagnose}
+    <section>
+      <h2>Laufende Vorgänge</h2>
+      <div class="kopf">
+        <span class="punkt" style:background={statusfarbe(diagnose.status.level)}></span>
+        <strong>{diagnose.status.label}</strong>
+        <span class="muted klein">
+          {diagnose.status.noticeable} von {diagnose.status.window} zuletzt auffällig
+        </span>
+      </div>
+      {#if diagnose.recent.length === 0}
+        <p class="muted klein">Noch nichts gemessen.</p>
+      {:else}
+        <table>
+          <tbody>
+            {#each diagnose.recent.slice(0, 12) as vorgang}
+              <tr>
+                <td class="muted">{vorgang.at?.slice(11, 19)}</td>
+                <td>{vorgang.name}</td>
+                <td style:color={stufenfarbe(vorgang.level)}>
+                  {Math.round(vorgang.dur_ms / 100) / 10} s
+                </td>
+                <td class="muted">{vorgang.status}</td>
+              </tr>
+            {/each}
+          </tbody>
+        </table>
+      {/if}
+      <p class="muted klein">Alles Weitere steht im Reiter Diagnose.</p>
+    </section>
+  {/if}
 
   <section>
     <h2>Ereignisse</h2>
@@ -270,6 +280,8 @@
     padding: 8px 10px; margin-bottom: 6px;
   }
   .zeile { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .kopf { display: flex; align-items: center; gap: 10px; font-size: 13px; flex-wrap: wrap; }
+  .punkt { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
   .muted { color: var(--muted); }
   .klein { font-size: 12px; margin: 4px 0 0; }
   .bad, .fehler { color: var(--bad); font-size: 13px; }

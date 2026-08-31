@@ -15,7 +15,9 @@ from typing import Any, Dict, Optional
 from ..api.events import bus
 from ..engine.approval import gate
 from ..engine.runner import open_run
+from ..storage import config as config_store
 from ..storage import database
+from ..telemetry import tracing
 from . import contact as contact_flow
 from . import login as login_flow
 
@@ -41,23 +43,41 @@ class Manager:
         if self.busy:
             raise RuntimeError("Es läuft bereits ein Vorgang")
 
-    async def _wrap(self, kind: str, work) -> None:
+    async def _wrap(self, kind: str, work, instance: Any = None) -> None:
+        # One job is one recorded cycle. It is thrown away again unless
+        # something in it was worth keeping (6.3).
+        if instance is not None:
+            await tracing.begin(instance, kind)
         try:
             outcome = await work()
             self.last = {"kind": kind, "at": _now(), "ok": True, "result": outcome}
+        except asyncio.CancelledError:
+            if instance is not None:
+                tracing.mark(instance.role, "Vorgang abgebrochen")
+            raise
         except Exception as error:  # noqa: BLE001 - reported, never lost
             self.last = {"kind": kind, "at": _now(), "ok": False,
                          "reason": f"{type(error).__name__}: {error}"}
+            if instance is not None:
+                tracing.mark(instance.role, f"{kind} endete mit einem Fehler")
             bus.publish("flow_failed", kind=kind, reason=str(error))
         finally:
             self.job = None
+            if instance is not None:
+                history = int(config_store.load().get("trace_history") or 20)
+                try:
+                    await tracing.end(instance, history)
+                except Exception:  # noqa: BLE001 - a recording is never the job
+                    pass
             bus.publish("flow_finished", kind=kind)
 
     def start_login(self, instance: Any) -> Dict[str, Any]:
         self._guard()
         self.job = {"kind": "anmeldung", "scope": instance.role, "started": _now()}
         bus.publish("flow_started", kind="anmeldung", scope=instance.role)
-        self._task = asyncio.create_task(self._wrap("anmeldung", lambda: login_flow.sign_in(instance)))
+        self._task = asyncio.create_task(
+            self._wrap("anmeldung", lambda: login_flow.sign_in(instance), instance)
+        )
         return self.state()
 
     def start_contact(self, instance: Any, key: str, url: str, title: str = "") -> Dict[str, Any]:
@@ -73,7 +93,7 @@ class Manager:
             await login_flow.ensure(instance)
             return await contact_flow.contact(instance, key, url, title)
 
-        self._task = asyncio.create_task(self._wrap("vorgang", work))
+        self._task = asyncio.create_task(self._wrap("vorgang", work, instance))
         return self.state()
 
     def stop(self) -> Dict[str, Any]:

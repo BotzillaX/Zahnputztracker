@@ -218,6 +218,18 @@
         <Feld label="Aufgezeichnete Durchläufe" hinweis="Rückschau bei einem Vorfall.">
           <input type="number" min="0" max="200" bind:value={daten.trace_history} />
         </Feld>
+        <Feld label="Bildfolge mitschreiben" hinweis="Bilder der letzten zwei Minuten.">
+          <label class="schalter">
+            <input type="checkbox" bind:checked={daten.record_frames} />
+            <span>aktiv</span>
+          </label>
+        </Feld>
+        <Feld label="Protokoll aufbewahren (Tage)">
+          <input type="number" min="1" max="365" bind:value={daten.retention_days_log} />
+        </Feld>
+        <Feld label="Vorfälle aufbewahren (Tage)">
+          <input type="number" min="1" max="365" bind:value={daten.retention_days_incident} />
+        </Feld>
       </div>
     </section>
 

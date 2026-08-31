@@ -38,10 +38,13 @@ def ensure_layout() -> None:
         roaming_dir() / "stats",
         roaming_dir() / "atlas",
         roaming_dir() / "incidents",
+        roaming_dir() / "reports",
         local_dir(),
         local_dir() / "browser",
         local_dir() / "profiles",
         local_dir() / "traces",
+        local_dir() / "traces" / "zyklen",
+        local_dir() / "traces" / "referenz",
     ):
         path.mkdir(parents=True, exist_ok=True)
 

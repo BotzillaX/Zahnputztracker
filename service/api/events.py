@@ -26,11 +26,27 @@ class EventBus:
         self._replay: Deque[Dict[str, Any]] = deque(maxlen=MAX_REPLAY)
         self._seq = 0
         self._loop: Any = None
+        # Sinks see every event synchronously (the log writes from here).
+        # They must be quick and must not raise.
+        self._sinks: List[Any] = []
+
+    def add_sink(self, sink: Any) -> None:
+        if sink not in self._sinks:
+            self._sinks.append(sink)
+
+    def remove_sink(self, sink: Any) -> None:
+        if sink in self._sinks:
+            self._sinks.remove(sink)
 
     def publish(self, kind: str, **payload: Any) -> Dict[str, Any]:
         self._seq += 1
         event: Dict[str, Any] = {"seq": self._seq, "ts": _now(), "kind": kind, **payload}
         self._replay.append(event)
+        for sink in list(self._sinks):
+            try:
+                sink(event)
+            except Exception:  # noqa: BLE001 - a sink never breaks the bus
+                pass
 
         # Some work runs in a worker thread (the download, for example).
         # Queues of the event loop must not be touched from there, so

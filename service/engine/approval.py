@@ -15,6 +15,7 @@ import asyncio
 from typing import Any, Dict, Optional
 
 from ..api.events import bus
+from ..telemetry import notify, spans
 
 ALLOWED = "erlaubt"
 REFUSED = "abgelehnt"
@@ -49,7 +50,15 @@ class Gate:
         self._answer = loop.create_future()
         mine = self._serial
         self._pending = {"id": mine, **request}
+        # While a request is open the run waits, so the clock of every
+        # running operation waits with it.
+        spans.pause()
         bus.publish("approval_open", **self._pending)
+        notify.notify(
+            notify.APPROVAL,
+            str(request.get("description") or "Es wartet eine Freigabe."),
+            scope=str(request.get("scope") or ""),
+        )
         try:
             answer = await self._answer
         finally:
@@ -74,6 +83,7 @@ class Gate:
             raise ValueError("Es fehlt die Eingabe")
         if not self._answer.done():
             self._answer.set_result({"decision": decision, "value": value})
+        spans.resume()
         # Closed the moment it is answered, not only when the waiting run
         # gets its turn again. Otherwise a caller that looks right after
         # answering still sees the old request and answers it twice.
@@ -85,6 +95,7 @@ class Gate:
         if self._answer is not None and not self._answer.done():
             self._answer.set_result({"decision": CANCELLED, "value": ""})
         self._pending = None
+        spans.resume()
         bus.publish("approval_cancelled", reason=reason)
 
 

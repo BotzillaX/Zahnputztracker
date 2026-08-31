@@ -73,6 +73,9 @@ DEFAULTS: Dict[str, Any] = {
     "confirm_wait_s": 3.0,
     "storage_cap_mb": 500,
     "trace_history": 20,
+    "record_frames": True,
+    "retention_days_log": 30,
+    "retention_days_incident": 7,
     "sound_on_new": True,
     "notify": True,
 }
@@ -89,6 +92,8 @@ _NUMERIC_RULES: List[Tuple[Tuple[str, ...], type, float, float]] = [
     (("confirm_wait_s",), float, 0.5, 60),
     (("storage_cap_mb",), int, 50, 100_000),
     (("trace_history",), int, 0, 200),
+    (("retention_days_log",), int, 1, 365),
+    (("retention_days_incident",), int, 1, 365),
 ]
 
 
@@ -171,7 +176,7 @@ def validate(candidate: Dict[str, Any]) -> Dict[str, Any]:
     data["profile_values"] = _pairs(data.get("profile_values"), ("label", "value"), "Persönliche Werte")
     data["answers"] = _pairs(data.get("answers"), ("label", "value", "display"), "Antwort-Paare")
 
-    for flag in ("review_mode", "sound_on_new", "notify"):
+    for flag in ("review_mode", "sound_on_new", "notify", "record_frames"):
         data[flag] = bool(data.get(flag))
     data["source"]["idle_behavior"] = bool(data["source"].get("idle_behavior"))
 

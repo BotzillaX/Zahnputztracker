@@ -8,6 +8,7 @@
   import Registrierung from "./routes/Registrierung.svelte";
   import Zustaende from "./routes/Zustaende.svelte";
   import Ansichten from "./routes/Ansichten.svelte";
+  import Diagnose from "./routes/Diagnose.svelte";
   import Einstellungen from "./routes/Einstellungen.svelte";
 
   const reiter = [
@@ -16,6 +17,7 @@
     { id: "registrierung", label: "Registrierung", ansicht: Registrierung },
     { id: "zustaende", label: "Zustände", ansicht: Zustaende },
     { id: "ansichten", label: "Ansichten", ansicht: Ansichten },
+    { id: "diagnose", label: "Diagnose", ansicht: Diagnose },
     { id: "einstellungen", label: "Einstellungen", ansicht: Einstellungen }
   ];
 

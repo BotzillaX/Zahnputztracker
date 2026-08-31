@@ -11,6 +11,7 @@ import hmac
 import os
 import sys
 import time
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -42,7 +43,17 @@ from ..flow import contract as flow_contract
 from ..flow import login as login_flow
 from ..flow import manager as flow_manager
 from ..registry import store as registry_store
-from ..telemetry import incidents
+from ..telemetry import (
+    frames,
+    housekeeping,
+    incidents,
+    journal,
+    report as diagnosis_report,
+    spans,
+    stats,
+    tracing,
+    watchdog,
+)
 from ..runtime import browser_install
 from ..storage import config as config_store
 from ..storage import database, secrets
@@ -82,8 +93,27 @@ def build_stamp() -> str:
     return _build
 
 
+@asynccontextmanager
+async def _lifespan(app: FastAPI):
+    """Start and stop the background watchers of the service."""
+    journal.attach()
+    journal.write("service_started", version=__version__, build=build_stamp())
+    housekeeping.sweep()
+    watchdog.start()
+    housekeeping.start()
+    try:
+        yield
+    finally:
+        journal.write("service_stopped")
+        await watchdog.stop()
+        await housekeeping.stop()
+        await frames.detach_all()
+        stats.flush(force=True)
+
+
 def create_app(token: str) -> FastAPI:
-    app = FastAPI(title="local service", version=__version__, docs_url=None, redoc_url=None)
+    app = FastAPI(title="local service", version=__version__, docs_url=None,
+                  redoc_url=None, lifespan=_lifespan)
 
     # The user interface runs from a different origin during development.
     app.add_middleware(
@@ -690,7 +720,7 @@ def create_app(token: str) -> FastAPI:
         except (FileNotFoundError, ValueError) as error:
             raise HTTPException(status_code=404, detail=str(error)) from error
 
-    @app.get("/incidents/{incident}/file/{name}", dependencies=guard)
+    @app.get("/incidents/{incident}/file/{name:path}", dependencies=guard)
     async def incident_file(incident: str, name: str):
         try:
             return FileResponse(incidents.file_of(incident, name))
@@ -704,6 +734,112 @@ def create_app(token: str) -> FastAPI:
         except ValueError as error:
             raise HTTPException(status_code=404, detail=str(error)) from error
         return {"removed": incident}
+
+    # ------------------------------------------------------------- diagnosis
+
+    def _degradations(days: int = 1) -> list:
+        """How often a role had to fall back to a weaker candidate."""
+        counted: Dict[str, Dict[str, Any]] = {}
+        for record in journal.entries(days):
+            if record.get("ev") != "degraded":
+                continue
+            role = str(record.get("role", ""))
+            entry = counted.setdefault(
+                role,
+                {"role": role, "label": record.get("label", role), "count": 0,
+                 "kind_label": record.get("kind_label", ""), "step": record.get("step", 0),
+                 "last": record.get("ts", "")},
+            )
+            entry["count"] += 1
+            entry["last"] = record.get("ts", entry["last"])
+            entry["kind_label"] = record.get("kind_label", entry["kind_label"])
+            entry["step"] = record.get("step", entry["step"])
+        return sorted(counted.values(), key=lambda item: -item["count"])
+
+    @app.get("/diagnose", dependencies=guard)
+    async def diagnosis() -> dict:
+        return {
+            "status": spans.level(),
+            "open": [item.report() for item in spans.open_spans()],
+            "recent": spans.recent(50),
+            "degraded": _degradations(),
+            "watchdog": watchdog.running(),
+            "frames": frames.state(),
+            "tracing": tracing.state(),
+            "storage": housekeeping.usage(),
+            "paused": spans.paused(),
+        }
+
+    @app.get("/diagnose/stats", dependencies=guard)
+    async def diagnosis_stats() -> dict:
+        settings = config_store.load()
+        return {
+            "names": list(spans.NAMES),
+            "limits": settings.get("limits", {}),
+            "stats": stats.summary(),
+            "min_samples": stats.MIN_SAMPLES,
+            "levels": stats.LEVEL_LABELS,
+        }
+
+    @app.get("/diagnose/log", dependencies=guard)
+    async def diagnosis_log(count: int = Query(default=200, ge=1, le=2000)) -> dict:
+        return {"days": journal.days(), "records": journal.tail(count)}
+
+    @app.get("/diagnose/storage", dependencies=guard)
+    async def diagnosis_storage() -> dict:
+        return housekeeping.usage()
+
+    @app.post("/diagnose/cleanup", dependencies=guard)
+    async def diagnosis_cleanup() -> dict:
+        return housekeeping.sweep()
+
+    @app.get("/diagnose/reports", dependencies=guard)
+    async def diagnosis_reports() -> dict:
+        return {"reports": diagnosis_report.listing(), "days": journal.days()}
+
+    @app.post("/diagnose/report", dependencies=guard)
+    async def diagnosis_write_report(body: Dict[str, Any] = Body(default={})) -> dict:
+        target = diagnosis_report.write(str(body.get("day", "") or ""))
+        return {"name": target.name, "path": str(target)}
+
+    @app.get("/diagnose/report/{name}", dependencies=guard)
+    async def diagnosis_read_report(name: str):
+        try:
+            return FileResponse(diagnosis_report.file_of(name), media_type="text/markdown")
+        except (FileNotFoundError, ValueError) as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+
+    @app.post("/diagnose/probe", dependencies=guard)
+    async def diagnosis_probe(body: Dict[str, Any] = Body(...)) -> dict:
+        """Hold one operation open on purpose (acceptance 7 and 8).
+
+        This is the only way to see the two thresholds without waiting
+        for the target page to have a bad day.
+        """
+        name = str(body.get("name") or "state.detect")
+        if name not in spans.NAMES:
+            raise HTTPException(status_code=422, detail="unbekannter Vorgang")
+        try:
+            seconds = float(body.get("seconds", 10))
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=422, detail="Sekunden sind keine Zahl") from None
+        if not 1 <= seconds <= 900:
+            raise HTTPException(status_code=422, detail="Sekunden müssen zwischen 1 und 900 liegen")
+        scope = str(body.get("scope") or runtime.SESSION)
+        if scope not in runtime.ROLES:
+            raise HTTPException(status_code=422, detail="unbekannter Browser")
+        instance = runtime.fleet.instance(scope)
+        if instance.page is None:
+            raise HTTPException(status_code=409, detail="Dieser Browser läuft nicht")
+
+        async def hold() -> None:
+            async with spans.span(name, instance=instance, probe=True):
+                await asyncio.sleep(seconds)
+
+        asyncio.create_task(hold())
+        return {"name": name, "scope": scope, "seconds": seconds,
+                "limit_s": spans.hard_limit(name),
+                "soft_ms": stats.soft_threshold(name, scope)}
 
     # ----------------------------------------------------------- page catalogue
 
