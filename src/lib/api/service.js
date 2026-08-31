@@ -118,3 +118,31 @@ export const ladeAnsichten = (bereich) =>
 export const merkeAnsicht = (bereich) => request(`/atlas/${bereich}/capture`, { method: "POST" });
 export const vergissAnsicht = (bereich, ansicht) =>
   request(`/atlas/${bereich}/${ansicht}`, { method: "DELETE" });
+
+export const ladeZustaende = (bereich) => request(`/states/${bereich}`);
+export const speichereZustand = (bereich, zustand) =>
+  request(`/states/${bereich}/${zustand.id}`, { method: "PUT", body: zustand });
+export const loescheZustand = (bereich, id) =>
+  request(`/states/${bereich}/${id}`, { method: "DELETE" });
+export const freieZustandsKennung = (bereich, wunsch) =>
+  request(`/states/${bereich}/new-id?wanted=${encodeURIComponent(wunsch || "zustand")}`);
+export const erkenneZustand = (bereich) =>
+  request(`/states/${bereich}/detect`, { method: "POST" });
+export const fuehreKetteAus = (bereich) => request(`/states/${bereich}/run`, { method: "POST" });
+
+export const ladeFreigabe = () => request("/approval");
+export const beantworteFreigabe = (id, entscheidung) =>
+  request("/approval/answer", { method: "POST", body: { id, decision: entscheidung } });
+
+export const ladeVariablen = () => request("/variables");
+export const oeffneVorgang = (kennung) =>
+  request("/variables/open", { method: "POST", body: { key: kennung ?? "" } });
+
+export const ladeVorlagen = (bereich) =>
+  request(`/templates${bereich ? `?scope=${encodeURIComponent(bereich)}` : ""}`);
+export const schalteVorlagen = (an) =>
+  request("/templates/switch", { method: "POST", body: { enabled: an } });
+export const stelleVorlagenHer = () => request("/templates/reset", { method: "POST" });
+export const loescheVorlage = (id) => request(`/templates/${id}`, { method: "DELETE" });
+export const uebernimmVorlage = (id, bereich) =>
+  request(`/templates/${id}/apply/${bereich}`, { method: "POST" });

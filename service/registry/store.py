@@ -240,3 +240,50 @@ def free_id(scope: str, wanted: str = "rolle") -> str:
     while f"{base}_{index}" in known:
         index += 1
     return f"{base}_{index}"
+
+
+# ----------------------------------------------------------------- states
+
+
+def state(scope: str, state_id: str) -> Optional[Dict[str, Any]]:
+    for entry in load(scope)["states"]:
+        if entry["id"] == state_id:
+            return entry
+    return None
+
+
+def put_state(scope: str, candidate: Dict[str, Any], note: str = "") -> Dict[str, Any]:
+    """Add or replace one state, keeping the order of the others."""
+    document = load(scope)
+    cleaned = model.clean_state(candidate)
+    cleaned["updated"] = model.now()
+    states = document["states"]
+    for index, entry in enumerate(states):
+        if entry["id"] == cleaned["id"]:
+            states[index] = cleaned
+            break
+    else:
+        states.append(cleaned)
+    return save(scope, document, note=note or f"Zustand {cleaned['id']} gespeichert")
+
+
+def drop_state(scope: str, state_id: str) -> Dict[str, Any]:
+    document = load(scope)
+    remaining = [entry for entry in document["states"] if entry["id"] != state_id]
+    if len(remaining) == len(document["states"]):
+        raise RegistryError(f"Zustand '{state_id}' ist nicht vorhanden")
+    document["states"] = remaining
+    return save(scope, document, note=f"Zustand {state_id} gelöscht")
+
+
+def free_state_id(scope: str, wanted: str = "zustand") -> str:
+    known = {entry["id"] for entry in load(scope)["states"]}
+    base = re.sub(r"[^a-z0-9_]", "_", wanted.lower()) or "zustand"
+    if not model.ID_PATTERN.match(base):
+        base = "zustand"
+    if base not in known:
+        return base
+    index = 2
+    while f"{base}_{index}" in known:
+        index += 1
+    return f"{base}_{index}"

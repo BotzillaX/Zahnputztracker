@@ -29,6 +29,9 @@ from fastapi.responses import FileResponse
 
 from .. import __version__
 from .. import atlas, runtime
+from ..engine import approval as engine_approval
+from ..engine import runner as engine_runner
+from ..engine import templates as engine_templates
 from ..picker import picker
 from ..picker import snapshot as snapshot_view
 from ..registry import model as registry_model
@@ -435,6 +438,150 @@ def create_app(token: str) -> FastAPI:
         instance = live_page(scope)
         await snapshot_view.release(instance.page)
         return {"released": True}
+
+    # ------------------------------------------------------------------ states
+
+    @app.get("/states/{scope}", dependencies=guard)
+    async def states_read(scope: str) -> dict:
+        """Everything the state editor needs, in one answer."""
+        scope = registry_scope(scope)
+        document = registry_answer(lambda: registry_store.load(scope))
+        settings = config_store.load()
+        return {
+            "scope": scope,
+            "label": registry_model.SCOPE_LABELS[scope],
+            "version": document["version"],
+            "states": document["states"],
+            "roles": [
+                {"id": role["id"], "label": role["label"], "menge": role["menge"],
+                 "taught": bool(role["candidates"]), "options": role["options"]}
+                for role in document["roles"]
+            ],
+            "actions": registry_model.ACTIONS,
+            "modes": registry_model.MODE_LABELS,
+            "conditions": registry_model.CONDITION_LABELS,
+            "sources": registry_model.SOURCE_LABELS,
+            "config_names": sorted(engine_runner.BUILT_IN_CONFIG)
+            + [str(entry.get("label", "")) for entry in settings.get("profile_values") or []],
+            "answer_names": [str(entry.get("label", "")) for entry in settings.get("answers") or []],
+            "secret_names": [
+                {"name": entry["name"], "label": entry["label"], "present": entry["present"]}
+                for entry in secrets.status()
+            ],
+            "variables": engine_runner.variables(),
+        }
+
+    @app.put("/states/{scope}/{state_id}", dependencies=guard)
+    async def states_put(scope: str, state_id: str, body: Dict[str, Any] = Body(...)) -> dict:
+        scope = registry_scope(scope)
+        candidate = {**body, "id": state_id}
+        stored = registry_answer(lambda: registry_store.put_state(scope, candidate))
+        bus.publish("state_saved", scope=scope, state=state_id, version=stored["version"])
+        return stored
+
+    @app.delete("/states/{scope}/{state_id}", dependencies=guard)
+    async def states_drop(scope: str, state_id: str) -> dict:
+        scope = registry_scope(scope)
+        stored = registry_answer(lambda: registry_store.drop_state(scope, state_id))
+        bus.publish("state_dropped", scope=scope, state=state_id, version=stored["version"])
+        return stored
+
+    @app.get("/states/{scope}/new-id", dependencies=guard)
+    async def states_new_id(scope: str, wanted: str = Query(default="zustand")) -> dict:
+        scope = registry_scope(scope)
+        return {"id": registry_store.free_state_id(scope, wanted)}
+
+    @app.post("/states/{scope}/detect", dependencies=guard)
+    async def states_detect(scope: str) -> dict:
+        """Which states hold on the page that is open right now."""
+        scope = registry_scope(scope)
+        instance = live_page(scope)
+        try:
+            return await engine_runner.state_report(instance, scope)
+        except registry_model.RegistryError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+        except Exception as error:  # noqa: BLE001 - reported as text
+            raise HTTPException(status_code=502, detail=str(error)) from error
+
+    @app.post("/states/{scope}/run", dependencies=guard)
+    async def states_run(scope: str, body: Dict[str, Any] = Body(default={})) -> dict:
+        """Detect the state and work through its chain (spec 2.6 to 2.8)."""
+        scope = registry_scope(scope)
+        instance = live_page(scope)
+        rounds = int(body.get("rounds") or engine_runner.MAX_ROUNDS)
+        try:
+            return await engine_runner.run_once(instance, scope, rounds)
+        except registry_model.RegistryError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+        except Exception as error:  # noqa: BLE001 - reported as text
+            raise HTTPException(status_code=502, detail=str(error)) from error
+
+    # -------------------------------------------------------------- approval
+
+    @app.get("/approval", dependencies=guard)
+    async def approval_state() -> dict:
+        return engine_approval.gate.state()
+
+    @app.post("/approval/answer", dependencies=guard)
+    async def approval_answer(body: Dict[str, Any] = Body(...)) -> dict:
+        try:
+            return engine_approval.gate.answer(
+                int(body.get("id") or 0), str(body.get("decision") or "")
+            )
+        except KeyError as error:
+            raise HTTPException(status_code=409, detail=str(error.args[0])) from error
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+
+    # ------------------------------------------------------------- variables
+
+    @app.get("/variables", dependencies=guard)
+    async def variables_read() -> dict:
+        return engine_runner.variables()
+
+    @app.post("/variables/open", dependencies=guard)
+    async def variables_open(body: Dict[str, Any] = Body(default={})) -> dict:
+        return engine_runner.open_run(str(body.get("key") or ""))
+
+    # ------------------------------------------------------------- templates
+
+    def template_answer(call):
+        try:
+            return call()
+        except engine_templates.TemplateError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+        except registry_model.RegistryError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+
+    @app.get("/templates", dependencies=guard)
+    async def templates_read(scope: Optional[str] = Query(default=None)) -> dict:
+        document = template_answer(engine_templates.load)
+        if scope:
+            wanted = registry_scope(scope)
+            document["templates"] = [
+                entry for entry in document["templates"] if entry.get("scope") == wanted
+            ]
+        return document
+
+    @app.post("/templates/switch", dependencies=guard)
+    async def templates_switch(body: Dict[str, Any] = Body(...)) -> dict:
+        return template_answer(lambda: engine_templates.set_enabled(bool(body.get("enabled"))))
+
+    @app.post("/templates/reset", dependencies=guard)
+    async def templates_reset() -> dict:
+        return template_answer(engine_templates.reset)
+
+    @app.delete("/templates/{template_id}", dependencies=guard)
+    async def templates_drop(template_id: str) -> dict:
+        return template_answer(lambda: engine_templates.drop(template_id))
+
+    @app.post("/templates/{template_id}/apply/{scope}", dependencies=guard)
+    async def templates_apply(template_id: str, scope: str) -> dict:
+        scope = registry_scope(scope)
+        stored = template_answer(lambda: engine_templates.apply(scope, template_id))
+        bus.publish("template_applied", scope=scope, template=template_id,
+                    version=stored["version"])
+        return stored
 
     # ----------------------------------------------------------- page catalogue
 

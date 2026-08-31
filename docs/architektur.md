@@ -217,3 +217,54 @@ starten" einen Dienst beenden, den der Kern nicht selbst gestartet hat.
 Der Fehlerkanal des Dienstes wird mitgelesen und landet in
 `%APPDATA%\Zahnputztracker\logs\dienst-fehler.log`. Eine Pipe, die niemand
 leert, blockiert den schreibenden Prozess, sobald sie voll ist.
+
+## Zustände, Bedingungen und Aktionen
+
+Der Ablauf ist keine Schrittfolge im Code. Er ergibt sich aus Zuständen, die du
+selbst definierst, und der Kette von Aktionen, die zu einem Zustand gehört.
+
+**Bedingungen.** Eine Bedingung ist immer dieselbe Art von Aussage: Rolle X ist
+sichtbar, oder Rolle X ist nicht sichtbar. Alle Bedingungen der Liste müssen
+zutreffen. Zusätzlich gibt es eine optionale ODER-Gruppe, von der mindestens
+eine zutreffen muss. Mehr Logik gibt es bewusst nicht. Jede Bedingung trägt ihre
+Art mit sich, damit eine weitere Art später dazukommen kann, ohne dass ein
+gespeicherter Zustand umgeschrieben werden muss.
+
+**Erkennung.** Vor jeder Aktionskette werden alle eingeschalteten Zustände
+geprüft. Jede beteiligte Rolle wird dabei genau einmal auf der Seite gesucht.
+Trifft genau einer zu, wird er genommen. Treffen mehrere zu, entscheidet die
+Priorität (die kleinere Zahl ist die stärkere). Haben die beiden stärksten
+dieselbe Zahl, wird nicht gewürfelt: das ist ein unbekannter Zustand. Ebenso,
+wenn eine Rolle mehrere sichtbare Treffer hat oder keiner der Zustände passt.
+Jedes Anhalten meldet, woran es lag.
+
+**Ausführungsmodus.** Jede einzelne Aktion trägt ihren Modus: `automatisch`,
+`freigabe` (die Anwendung zeigt, was sie tun würde, und wartet) oder `manuell`
+(du erledigst es selbst im eingeblendeten Fenster und bestätigst). Solange eine
+Freigabe offen ist, läuft nichts anderes weiter. Der Streifen dafür steht über
+allen Reitern, weil er den ganzen Ablauf betrifft.
+
+**Quellen.** Ein Text, den eine Aktion einträgt, steht nie im Zustand selbst. Er
+kommt aus einem Konfigurationswert, einem Antwort-Paar, dem
+Anmeldeinformationsspeicher (`geheimnis`) oder dem Variablenraum. Ein Geheimnis
+wird erst im Moment des Eintragens geholt und taucht in keiner Meldung, keiner
+Beschreibung und keinem Bericht auf. Die Einstellungen `Zugangskennung` und
+`Startadresse` sind als Konfigurationswerte direkt ansprechbar.
+
+**Variablenraum.** Was eine Aktion ausliest, landet unter einem Namen im
+Variablenraum. Beide Browser lesen aus demselben Raum. Er ist nicht dauerhaft
+und wird zu Beginn jedes Vorgangs geleert, damit kein Wert des vorigen Eintrags
+in das nächste rutscht.
+
+**Vorlagen.** Die mitgelieferten Zustands-Vorlagen liegen in
+`%APPDATA%\Zahnputztracker\vorlagen.json`. Sie enthalten keine Erkennungs-
+merkmale, sondern nur Bedingungen und Ketten über den neutralen Rollen des
+Grundkatalogs. Eine Vorlage tut nichts, bis du sie lädst; danach ist sie ein
+gewöhnlicher Zustand. Einzelne Vorlagen lassen sich löschen, ein Schalter
+schaltet die Vorlagen komplett ab, und der mitgelieferte Satz lässt sich
+wiederherstellen.
+
+**Noch nicht angebunden.** Die Aktion "Anschreiben generieren" hält definiert
+an, solange die Textgenerierung fehlt (nächste Ausbaustufe). "Als kontaktiert
+dokumentieren" und "Überspringen" schreiben in die Datenbank, brauchen aber
+einen laufenden Vorgang mit einer Kennung; ohne den halten sie ebenfalls an.

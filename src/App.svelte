@@ -2,9 +2,11 @@
   import { onMount } from "svelte";
   import { initService } from "./lib/api/service.js";
   import { serviceStatus } from "./lib/stores/service.js";
+  import Freigabe from "./lib/components/Freigabe.svelte";
   import Betrieb from "./routes/Betrieb.svelte";
   import Browser from "./routes/Browser.svelte";
   import Registrierung from "./routes/Registrierung.svelte";
+  import Zustaende from "./routes/Zustaende.svelte";
   import Ansichten from "./routes/Ansichten.svelte";
   import Einstellungen from "./routes/Einstellungen.svelte";
 
@@ -12,6 +14,7 @@
     { id: "betrieb", label: "Betrieb", ansicht: Betrieb },
     { id: "browser", label: "Browser", ansicht: Browser },
     { id: "registrierung", label: "Registrierung", ansicht: Registrierung },
+    { id: "zustaende", label: "Zustände", ansicht: Zustaende },
     { id: "ansichten", label: "Ansichten", ansicht: Ansichten },
     { id: "einstellungen", label: "Einstellungen", ansicht: Einstellungen }
   ];
@@ -43,6 +46,9 @@
   </header>
 
   {#if startfehler}<p class="fehler">{startfehler}</p>{/if}
+
+  <!-- Eine offene Freigabe haelt den Ablauf an, also steht sie ueber allen Reitern. -->
+  {#if $serviceStatus.state === "verbunden"}<Freigabe />{/if}
 
   {#if $serviceStatus.state === "verbunden"}
     <Ansicht />
