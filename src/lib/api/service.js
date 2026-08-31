@@ -79,3 +79,42 @@ export const setzeSichtbar = (rolle, sichtbar) =>
 export const gehZu = (rolle, url) =>
   request(`/browser/${rolle}/navigate`, { method: "POST", body: url ? { url } : {} });
 export const zaehleFenster = (pids) => invoke("browser_window_count", { pids });
+
+export const ladeRegistrierung = (bereich) => request(`/registry/${bereich}`);
+export const speichereRegistrierung = (bereich, dokument) =>
+  request(`/registry/${bereich}`, { method: "PUT", body: dokument });
+export const ladeGrundkatalog = (bereich) => request(`/registry/${bereich}/catalogue`);
+export const uebernimmGrundkatalog = (bereich) =>
+  request(`/registry/${bereich}/catalogue`, { method: "POST" });
+export const speichereRolle = (bereich, rolle) =>
+  request(`/registry/${bereich}/roles/${rolle.id}`, { method: "PUT", body: rolle });
+export const loescheRolle = (bereich, id) =>
+  request(`/registry/${bereich}/roles/${id}`, { method: "DELETE" });
+export const ladeVersionen = (bereich) => request(`/registry/${bereich}/history`);
+export const setzeZurueck = (bereich, version) =>
+  request(`/registry/${bereich}/restore`, { method: "POST", body: { version } });
+export const exportiereRegistrierung = (bereich) =>
+  request(`/registry/${bereich}/export`, { method: "POST" });
+export const importiereRegistrierung = (bereich, dokument) =>
+  request(`/registry/${bereich}/import`, { method: "POST", body: { document: dokument } });
+export const freieKennung = (bereich, wunsch) =>
+  request(`/registry/${bereich}/new-id?wanted=${encodeURIComponent(wunsch || "rolle")}`);
+export const pruefeRollen = (bereich, rolle) =>
+  request(`/registry/${bereich}/check`, { method: "POST", body: rolle ? { role: rolle } : {} });
+
+export const ladePicker = () => request("/picker");
+export const startePicker = (bereich) => request(`/picker/${bereich}/start`, { method: "POST" });
+export const stoppePicker = (bereich) => request(`/picker/${bereich}/stop`, { method: "POST" });
+export const verwirfAuswahl = () => request("/picker/clear", { method: "POST" });
+export const oeffneKopie = (bereich, ansicht, herkunft) =>
+  request(`/picker/${bereich}/snapshot`, {
+    method: "POST",
+    body: { view: ansicht, from: herkunft ?? bereich }
+  });
+export const gibNetzFrei = (bereich) => request(`/picker/${bereich}/release`, { method: "POST" });
+
+export const ladeAnsichten = (bereich) =>
+  request(`/atlas${bereich ? `?scope=${encodeURIComponent(bereich)}` : ""}`);
+export const merkeAnsicht = (bereich) => request(`/atlas/${bereich}/capture`, { method: "POST" });
+export const vergissAnsicht = (bereich, ansicht) =>
+  request(`/atlas/${bereich}/${ansicht}`, { method: "DELETE" });

@@ -24,3 +24,13 @@ export async function request(pfad, { method = "GET", body } = {}) {
   }
   return daten;
 }
+
+/** Bilddatei des Dienstes als Objekt-Adresse, für <img src>. */
+export async function requestBlobUrl(pfad) {
+  const { port, token } = await endpoint();
+  const antwort = await fetch(`http://127.0.0.1:${port}${pfad}`, {
+    headers: { "X-Auth-Token": token }
+  });
+  if (!antwort.ok) throw new Error(`HTTP ${antwort.status}`);
+  return URL.createObjectURL(await antwort.blob());
+}

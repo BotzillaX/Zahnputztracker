@@ -4,11 +4,15 @@
   import { serviceStatus } from "./lib/stores/service.js";
   import Betrieb from "./routes/Betrieb.svelte";
   import Browser from "./routes/Browser.svelte";
+  import Registrierung from "./routes/Registrierung.svelte";
+  import Ansichten from "./routes/Ansichten.svelte";
   import Einstellungen from "./routes/Einstellungen.svelte";
 
   const reiter = [
     { id: "betrieb", label: "Betrieb", ansicht: Betrieb },
     { id: "browser", label: "Browser", ansicht: Browser },
+    { id: "registrierung", label: "Registrierung", ansicht: Registrierung },
+    { id: "ansichten", label: "Ansichten", ansicht: Ansichten },
     { id: "einstellungen", label: "Einstellungen", ansicht: Einstellungen }
   ];
 

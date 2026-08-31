@@ -10,6 +10,7 @@ import asyncio
 import hmac
 import os
 import time
+from pathlib import Path
 from typing import Any, Dict, Optional
 
 from fastapi import (
@@ -23,9 +24,15 @@ from fastapi import (
     WebSocketDisconnect,
 )
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 
 from .. import __version__
-from .. import runtime
+from .. import atlas, runtime
+from ..picker import picker
+from ..picker import snapshot as snapshot_view
+from ..registry import model as registry_model
+from ..registry import resolve as registry_resolve
+from ..registry import store as registry_store
 from ..runtime import browser_install
 from ..storage import config as config_store
 from ..storage import database, secrets
@@ -215,6 +222,218 @@ def create_app(token: str) -> FastAPI:
             raise HTTPException(status_code=502, detail=str(error)) from error
         bus.publish("browser_navigated", role=role, url=reached)
         return runtime.fleet.snapshot()
+
+    # ---------------------------------------------------------------- registry
+
+    def registry_scope(scope: str) -> str:
+        try:
+            return registry_model.check_scope(scope)
+        except registry_model.RegistryError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+
+    def registry_answer(call):
+        """Run a registry operation and turn a refusal into a message."""
+        try:
+            return call()
+        except registry_model.RegistryError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+
+    def live_page(scope: str):
+        """The page of an instance, or a clear reason why there is none."""
+        try:
+            instance = runtime.fleet.instance(scope)
+        except runtime.BrowserError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        if instance.page is None:
+            raise HTTPException(
+                status_code=409,
+                detail=f"{registry_model.SCOPE_LABELS[scope]} laeuft nicht",
+            )
+        return instance
+
+    @app.get("/registry/{scope}", dependencies=guard)
+    async def registry_read(scope: str) -> dict:
+        scope = registry_scope(scope)
+        document = registry_answer(lambda: registry_store.load(scope))
+        document["label"] = registry_model.SCOPE_LABELS[scope]
+        document["kinds"] = registry_model.KIND_LABELS
+        return document
+
+    @app.put("/registry/{scope}", dependencies=guard)
+    async def registry_write(scope: str, body: Dict[str, Any] = Body(...)) -> dict:
+        scope = registry_scope(scope)
+        stored = registry_answer(lambda: registry_store.save(scope, body, note="Bearbeitet"))
+        bus.publish("registry_saved", scope=scope, version=stored["version"])
+        return stored
+
+    @app.get("/registry/{scope}/catalogue", dependencies=guard)
+    async def registry_catalogue(scope: str) -> dict:
+        scope = registry_scope(scope)
+        return {"roles": registry_model.catalogue(scope)}
+
+    @app.post("/registry/{scope}/catalogue", dependencies=guard)
+    async def registry_catalogue_add(scope: str) -> dict:
+        scope = registry_scope(scope)
+        stored = registry_answer(lambda: registry_store.add_catalogue(scope))
+        bus.publish("registry_saved", scope=scope, version=stored["version"])
+        return stored
+
+    @app.put("/registry/{scope}/roles/{role_id}", dependencies=guard)
+    async def registry_put_role(
+        scope: str, role_id: str, body: Dict[str, Any] = Body(...)
+    ) -> dict:
+        scope = registry_scope(scope)
+        candidate = {**body, "id": role_id}
+        stored = registry_answer(lambda: registry_store.put_role(scope, candidate))
+        bus.publish("registry_saved", scope=scope, version=stored["version"], role=role_id)
+        return stored
+
+    @app.delete("/registry/{scope}/roles/{role_id}", dependencies=guard)
+    async def registry_drop_role(scope: str, role_id: str) -> dict:
+        scope = registry_scope(scope)
+        stored = registry_answer(lambda: registry_store.drop_role(scope, role_id))
+        bus.publish("registry_saved", scope=scope, version=stored["version"], role=role_id)
+        return stored
+
+    @app.get("/registry/{scope}/history", dependencies=guard)
+    async def registry_history(scope: str) -> dict:
+        scope = registry_scope(scope)
+        return {"versions": registry_store.history(scope)}
+
+    @app.post("/registry/{scope}/restore", dependencies=guard)
+    async def registry_restore(scope: str, body: Dict[str, Any] = Body(...)) -> dict:
+        scope = registry_scope(scope)
+        version = int(body.get("version") or 0)
+        stored = registry_answer(lambda: registry_store.restore(scope, version))
+        bus.publish("registry_restored", scope=scope, version=stored["version"], back_to=version)
+        return stored
+
+    @app.post("/registry/{scope}/export", dependencies=guard)
+    async def registry_export(scope: str) -> dict:
+        scope = registry_scope(scope)
+        return registry_answer(lambda: registry_store.export(scope))
+
+    @app.post("/registry/{scope}/import", dependencies=guard)
+    async def registry_import(scope: str, body: Dict[str, Any] = Body(...)) -> dict:
+        scope = registry_scope(scope)
+        if body.get("path"):
+            stored = registry_answer(
+                lambda: registry_store.import_file(scope, str(body["path"]))
+            )
+        else:
+            stored = registry_answer(
+                lambda: registry_store.import_document(scope, body.get("document"))
+            )
+        bus.publish("registry_saved", scope=scope, version=stored["version"])
+        return stored
+
+    @app.get("/registry/{scope}/new-id", dependencies=guard)
+    async def registry_new_id(scope: str, wanted: str = Query(default="rolle")) -> dict:
+        scope = registry_scope(scope)
+        return {"id": registry_store.free_id(scope, wanted)}
+
+    @app.post("/registry/{scope}/check", dependencies=guard)
+    async def registry_check(scope: str, body: Dict[str, Any] = Body(default={})) -> dict:
+        """Try the stored candidates against the page that is open now."""
+        scope = registry_scope(scope)
+        instance = live_page(scope)
+        roles = registry_answer(lambda: registry_store.load(scope))["roles"]
+        wanted = str(body.get("role") or "")
+        if wanted:
+            roles = [role for role in roles if role["id"] == wanted]
+            if not roles:
+                raise HTTPException(status_code=404, detail="unbekannte Rolle")
+        try:
+            reports = await registry_resolve.check_all(instance.page, roles)
+        except Exception as error:  # noqa: BLE001 - reported as text
+            raise HTTPException(status_code=502, detail=str(error)) from error
+        return {"url": instance.page.url, "results": reports}
+
+    # ------------------------------------------------------------------ picker
+
+    @app.get("/picker", dependencies=guard)
+    async def picker_state() -> dict:
+        return picker.state()
+
+    @app.post("/picker/{scope}/start", dependencies=guard)
+    async def picker_start(scope: str) -> dict:
+        scope = registry_scope(scope)
+        instance = live_page(scope)
+        try:
+            return await picker.start(instance.page, scope)
+        except Exception as error:  # noqa: BLE001
+            raise HTTPException(status_code=502, detail=str(error)) from error
+
+    @app.post("/picker/{scope}/stop", dependencies=guard)
+    async def picker_stop(scope: str) -> dict:
+        scope = registry_scope(scope)
+        instance = live_page(scope)
+        try:
+            return await picker.stop(instance.page)
+        except Exception as error:  # noqa: BLE001
+            raise HTTPException(status_code=502, detail=str(error)) from error
+
+    @app.post("/picker/clear", dependencies=guard)
+    async def picker_clear() -> dict:
+        return picker.clear()
+
+    @app.post("/picker/{scope}/snapshot", dependencies=guard)
+    async def picker_snapshot(scope: str, body: Dict[str, Any] = Body(...)) -> dict:
+        """Open a saved copy of a view, without script and without network."""
+        scope = registry_scope(scope)
+        instance = live_page(scope)
+        view = str(body.get("view") or "")
+        source = str(body.get("path") or "")
+        try:
+            if source:
+                file = Path(source)
+            else:
+                file = atlas.catalog.snapshot_file(str(body.get("from") or scope), view)
+            opened = await snapshot_view.open_on(instance.page, file)
+        except FileNotFoundError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        except Exception as error:  # noqa: BLE001
+            raise HTTPException(status_code=502, detail=str(error)) from error
+        bus.publish("snapshot_opened", scope=scope, view=view)
+        return opened
+
+    @app.post("/picker/{scope}/release", dependencies=guard)
+    async def picker_release(scope: str) -> dict:
+        scope = registry_scope(scope)
+        instance = live_page(scope)
+        await snapshot_view.release(instance.page)
+        return {"released": True}
+
+    # ----------------------------------------------------------- page catalogue
+
+    @app.get("/atlas", dependencies=guard)
+    async def atlas_views(scope: Optional[str] = Query(default=None)) -> dict:
+        if scope:
+            scope = registry_scope(scope)
+        return {"views": atlas.views(scope)}
+
+    @app.post("/atlas/{scope}/capture", dependencies=guard)
+    async def atlas_capture(scope: str) -> dict:
+        scope = registry_scope(scope)
+        instance = live_page(scope)
+        record = await atlas.capture(instance.page, scope, trigger="Von Hand")
+        if record is None:
+            raise HTTPException(status_code=502, detail="Die Ansicht war nicht lesbar")
+        return record
+
+    @app.get("/atlas/{scope}/{view}/screenshot", dependencies=guard)
+    async def atlas_screenshot(scope: str, view: str):
+        scope = registry_scope(scope)
+        try:
+            return FileResponse(atlas.catalog.screenshot_file(scope, view))
+        except FileNotFoundError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+
+    @app.delete("/atlas/{scope}/{view}", dependencies=guard)
+    async def atlas_forget(scope: str, view: str) -> dict:
+        scope = registry_scope(scope)
+        atlas.forget(scope, view)
+        return {"removed": view}
 
     # ------------------------------------------------------------------ stream
 

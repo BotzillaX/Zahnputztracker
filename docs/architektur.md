@@ -108,3 +108,94 @@ schalten, ohne sich gegenseitig zu überschreiben.
 Anhalten ist ein Schalter im Dienst. Beide Browser bleiben offen und behalten
 ihren Zustand, es wird nichts neu geladen. Das Tray zeigt den Zustand an und
 schaltet ihn um.
+
+
+## Seitenwissen: Rollen, Auswahlmodus, Ansichten
+
+### Die Trennlinie
+
+Im Code steht der Rahmen: wie ein Element beschrieben wird, in welcher
+Reihenfolge Merkmale geprüft werden, wie gespeichert und zurückgesetzt wird.
+In der Registrierung steht das Seitenwissen: welche Elemente es gibt und woran
+man sie erkennt. Kein einziger Selektor, kein Attributname und kein Text der
+Zielseite steht im Programm.
+
+Eine Verschiebung dieser Linie bleibt dadurch eine Änderung an einer Stelle:
+neue Merkmalsarten kommen in `service/picker/overlay/overlay.js` (Erzeugen und
+Suchen) und in `service/registry/model.py` (Prüfen und Speichern) dazu, sonst
+nirgends.
+
+### Rollen
+
+Eine Rolle ist ein abstrakter Name für etwas auf der Seite. Sie hat eine
+neutrale Kennung, einen frei wählbaren Anzeigenamen, die Instanz, zu der sie
+gehört, das Feld `menge` (`einzel` oder `liste`), eine Notiz, optional ein
+Attribut als Kennungsträger und die priorisierte Liste ihrer Merkmale.
+
+Die Anwendung liefert einen Grundkatalog neutral benannter Rollen mit. Er
+enthält bewusst kein einziges Merkmal: nach dem Übernehmen kann die Anwendung
+weiterhin nichts, bis angelernt wurde. Eigene Rollen sind jederzeit möglich und
+werden technisch gleich behandelt.
+
+### Erkennungsmerkmale und Degradierung
+
+Zu jedem ausgewählten Element werden Merkmale in dieser Reihenfolge erzeugt und
+geprüft:
+
+| Reihenfolge | Merkmal |
+|---|---|
+| 1 | Datenattribute (Prüfkonventionen zuerst) |
+| 2 | Rolle und zugänglicher Name |
+| 3 | Sichtbarer Text |
+| 4 | Kennung, sofern sie nicht erzeugt wirkt |
+| 5 | Verkürzter Strukturpfad (letzte Rückfallebene) |
+
+Das erste treffende Merkmal gilt. Musste ausgewichen werden, ist das eine
+Degradierung: sie wird gemeldet und angezeigt, hält aber nichts an. Sie ist das
+Frühwarnsystem für Layout-Änderungen.
+
+Feste Auflösungsregel bei mehreren Treffern: gibt es das Element doppelt und ist
+nur eines sichtbar, gilt das sichtbare, und der Doppeltreffer wird protokolliert.
+Sind mehrere sichtbar, ist das ein unbekannter Zustand und es geschieht nichts.
+Ein nur verborgen vorhandenes Element gilt nie als Treffer.
+
+### Auswahlmodus
+
+Das Overlay wird über `add_init_script` in beide Instanzen injiziert und ist
+darum nach jeder Navigation wieder da. Element anfahren hebt es hervor, die
+Pfeiltasten hoch und runter wechseln die Ebene, links und rechts den Nachbarn,
+Enter übernimmt, Esc bricht ab. Zusätzlich wirkt Strg+Umschalt+Y im Fenster.
+
+Das Zuordnungspanel liegt in der Anwendung, nicht in der Seite. Je weniger das
+Overlay in der Seite tut, desto kleiner das Risiko, dass es in gespeichertem
+Material auftaucht. Jeder Knoten des Overlays trägt ein Kennzeichen; vor einem
+Bild wird es unsichtbar geschaltet, aus jeder gespeicherten Kopie wird es
+entfernt.
+
+### Auswahl auf einer gespeicherten Kopie
+
+Eine Korrektur soll möglich sein, ohne die Situation neu herzustellen. Dafür
+wird die gespeicherte Kopie örtlich geöffnet, vorher werden alle Skripte und
+Ereignisbehandler daraus entfernt, und der Browser darf währenddessen nichts
+aus dem Netz laden. Die Kopie sieht deshalb ungestaltet aus; es geht um die
+Struktur, nicht um das Aussehen. Nach der Reparatur hebt "Netzsperre aufheben"
+die Sperre wieder auf.
+
+### Versionierung
+
+Jede Änderung schreibt eine neue Fassung, die vorherige wandert ins Archiv.
+Zurücksetzen holt eine alte Fassung als neue Fassung zurück, verwirft also
+nichts. Export und Import laufen über eine Datei je Instanz.
+
+Alles liegt in `%APPDATA%\Zahnputztracker\registry`, nie im Projektordner.
+
+### Seiten-Katalog (Stufe 1)
+
+Bei jedem Seitenwechsel wird eine strukturelle Signatur der Ansicht gebildet:
+welche Arten von Elementen sichtbar sind, nicht was sie sagen. Eine unbekannte
+Signatur wird einmal mit Kopie, Bild, Adresse, Zeitpunkt und auslösender Aktion
+gesichert, eine bekannte erhöht nur den Zähler und vermerkt den Weg hinein.
+
+Der Katalog ist reiner Beobachter: schlägt er fehl, läuft der Betrieb weiter.
+Die Karte über dieses Material kommt später, das Material selbst wird ab jetzt
+gesammelt.

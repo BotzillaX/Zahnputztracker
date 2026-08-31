@@ -19,7 +19,10 @@ from typing import Any, Dict, List, Optional
 
 import psutil
 
+from .. import atlas
 from ..api.events import bus
+from ..picker import OVERLAY_SOURCE
+from ..picker.session import BINDING, picker
 from ..storage import paths
 from . import browser_install
 
@@ -109,6 +112,10 @@ class Instance:
         self.visible = False
         self.extra_pages_closed = 0
         self.last_error = ""
+        # Recording of seen views can be switched off per instance.
+        self.catalogue = True
+        # What led to the next view, set by whoever triggers it.
+        self.next_trigger = ""
 
     # ------------------------------------------------------------- lifecycle
 
@@ -149,6 +156,7 @@ class Instance:
         self.page = context.pages[0] if context.pages else await context.new_page()
         context.on("page", self._reject_extra_page)
         context.on("close", self._forget)
+        await self._equip(context)
         self.pids = _new_processes(executable, before)
         self.pid = self.pids[0] if self.pids else None
         self.visible = False
@@ -198,6 +206,51 @@ class Instance:
         except (OSError, TypeError, ValueError) as error:
             bus.publish("browser_note", role=self.role, message=f"Merken misslang: {error}")
 
+    # ---------------------------------------------------- overlay and catalogue
+
+    async def _equip(self, context: Any) -> None:
+        """Give the instance its overlay and start watching for new views.
+
+        The overlay is injected as an init script, so it is there again
+        after every navigation (spec 2.5). The page that is already open
+        gets it directly, because init scripts only apply to documents
+        opened afterwards.
+        """
+        role = self.role
+
+        def report(_source: Any, payload: Any) -> None:
+            if isinstance(payload, dict):
+                picker.report(role, payload)
+
+        await context.expose_binding(BINDING, report)
+        await context.add_init_script(OVERLAY_SOURCE)
+        try:
+            await self.page.evaluate(OVERLAY_SOURCE)
+        except Exception as error:  # noqa: BLE001 - reported, not fatal
+            bus.publish("browser_note", role=role, message=f"Overlay: {error}")
+        self.page.on("framenavigated", self._on_navigated)
+
+    def _on_navigated(self, frame: Any) -> None:
+        if self.page is None or frame is not self.page.main_frame:
+            return
+        asyncio.ensure_future(self._record_view("Navigation"))
+
+    async def _record_view(self, trigger: str) -> None:
+        """Add the current view to the catalogue. Never disturbs the run."""
+        page = self.page
+        if page is None or not self.catalogue:
+            return
+        if self.next_trigger:
+            trigger, self.next_trigger = self.next_trigger, ""
+        try:
+            await page.wait_for_load_state("domcontentloaded", timeout=15_000)
+            if page.url.startswith("file:"):
+                # A saved copy being repaired is not a view of the page.
+                return
+            await atlas.capture(page, self.role, trigger=trigger)
+        except Exception:  # noqa: BLE001 - the catalogue is only an observer
+            pass
+
     async def close(self) -> None:
         context, self.context, self.page = self.context, None, None
         self.pid = None
@@ -238,6 +291,7 @@ class Instance:
         """Go to an address. Links are never clicked (spec 5.2)."""
         if self.page is None:
             raise BrowserError(f"{ROLE_LABELS[self.role]} läuft nicht")
+        self.next_trigger = "Adresszeile"
         await self.page.goto(url, timeout=timeout_s * 1000, wait_until="domcontentloaded")
         return self.page.url
 
