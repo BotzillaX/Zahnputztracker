@@ -199,3 +199,21 @@ gesichert, eine bekannte erhöht nur den Zähler und vermerkt den Weg hinein.
 Der Katalog ist reiner Beobachter: schlägt er fehl, läuft der Betrieb weiter.
 Die Karte über dieses Material kommt später, das Material selbst wird ab jetzt
 gesammelt.
+
+### Übernahme eines laufenden Dienstes
+
+Schließt du nur das Fenster, läuft der Dienst weiter und wird beim nächsten
+Start übernommen. Übernommen wird aber nur ein Dienst, der aus demselben
+Codestand läuft: der Dienst meldet unter `/health` eine Kennzeichnung seines
+Standes (beim Entwickeln der jüngste Änderungszeitpunkt der Dienstdateien, im
+Paket die Fassung), der Kern vergleicht sie mit seiner Erwartung.
+
+Passt sie nicht, wird der alte Dienst über die Prozesskennung aus `runtime.json`
+beendet und ein neuer gestartet. Ohne diese Regel läuft die Anwendung nach einer
+Codeänderung stillschweigend mit dem alten Stand weiter, und man sucht den
+Fehler an der falschen Stelle. Aus demselben Grund darf auch "Dienst neu
+starten" einen Dienst beenden, den der Kern nicht selbst gestartet hat.
+
+Der Fehlerkanal des Dienstes wird mitgelesen und landet in
+`%APPDATA%\Zahnputztracker\logs\dienst-fehler.log`. Eine Pipe, die niemand
+leert, blockiert den schreibenden Prozess, sobald sie voll ist.
