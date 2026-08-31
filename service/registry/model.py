@@ -79,6 +79,8 @@ BASE_CATALOGUE: Dict[str, List[Tuple[str, str, str]]] = {
         ("form_field_b", "Formularfeld B", SINGLE),
         ("form_field_c", "Formularfeld C", SINGLE),
         ("form_field_d", "Formularfeld D", SINGLE),
+        ("ready_marker", "Seite-fertig-Merkmal", SINGLE),
+        ("already_marker", "Bereits-erledigt-Merkmal", SINGLE),
     ],
 }
 
@@ -100,6 +102,7 @@ def blank_role(role_id: str, label: str, scope: str, quantity: str = SINGLE) -> 
         "menge": quantity,
         "notes": "",
         "key_attribute": "",
+        "answer": "",
         "options": [],
         "candidates": [],
         "updated": now(),
@@ -173,6 +176,9 @@ def clean_role(raw: Any, scope: str) -> Dict[str, Any]:
         "menge": quantity,
         "notes": str(raw.get("notes") or ""),
         "key_attribute": str(raw.get("key_attribute") or "").strip(),
+        # Which answer pair fills this field (spec 8.3). Empty means the
+        # field is left alone.
+        "answer": str(raw.get("answer") or "").strip(),
         "options": options,
         "candidates": [
             clean_candidate(candidate, index)

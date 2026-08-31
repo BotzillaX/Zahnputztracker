@@ -268,3 +268,65 @@ wiederherstellen.
 an, solange die Textgenerierung fehlt (nächste Ausbaustufe). "Als kontaktiert
 dokumentieren" und "Überspringen" schreiben in die Datenbank, brauchen aber
 einen laufenden Vorgang mit einer Kennung; ohne den halten sie ebenfalls an.
+
+## Anmeldung und ein Vorgang von Anfang bis Ende
+
+**Die Trennlinie steht in einer Datei.** `service/flow/contract.py` listet
+vollständig auf, welche Rollennamen der Ablauf kennt: Merkmal für den
+angemeldeten Zustand, Kennungsfeld, Geheimnisfeld, Knopf für die Anmeldung,
+Merkmal und Feld für einen Code, Merkmal für die fertig geladene Seite, Merkmal
+für einen bereits erledigten Eintrag, Knopf zum Öffnen des Formulars, Textfeld,
+Absende-Element, Bestätigungs-Merkmal. Dazu zwei Familien: jede Rolle, deren
+Kennung mit `exclusion_marker` beginnt, ist ein Grund, einen Eintrag in Ruhe zu
+lassen; jede Rolle, deren Kennung mit `form_field` beginnt, ist ein Formularfeld
+und wird aus dem Antwort-Paar gefüllt, das an der Rolle hinterlegt ist. Was
+hinter einem Namen steckt, entscheidest allein du im Picker. Fehlt eine
+Pflichtrolle, wird sie beim Namen genannt, statt dass etwas versucht wird.
+
+**Anmeldung.** Vor jedem Vorgang wird der Anmeldestand über das angelernte
+Merkmal geprüft. Ist er weg, läuft der Anmeldeablauf: Kennung aus den
+Einstellungen, Geheimnis aus dem Anmeldeinformationsspeicher, abschicken. Kommt
+eine Code-Abfrage, hält alles an und fragt in der Anwendung nach dem Code (der
+Code steht in keinem Ereignis und in keiner Datei). Nach drei erfolglosen
+Versuchen wird endgültig angehalten, jeder Fehlversuch wird als Vorfall
+festgehalten.
+
+**Ein Vorgang.** Die vierzehn Schritte stehen in `service/flow/contact.py` in
+genau der Reihenfolge der Spezifikation. Wichtig sind die Ausgänge:
+
+| Situation | Status | Wird erneut angeboten |
+|---|---|---|
+| Ausschluss-Merkmal sichtbar | übersprungen | nein |
+| Seite meldet: bereits erledigt | bereits_angefragt | nein |
+| Nachrichtenfeld erscheint nicht | übersprungen (nicht mehr verfügbar) | nein |
+| Kein Text vom Anbieter | fehlgeschlagen, mit Vorfall | ja |
+| Abgesendet, keine Bestätigung | unklar, mit Vorfall | nein, du entscheidest |
+| Bestätigt | kontaktiert | nein |
+| Freigabe abgelehnt | offen | ja |
+
+**Nur nach Bestätigung.** Unmittelbar vor dem Absenden wird ein Vermerk
+geschrieben, nach der Bestätigung wird er bestätigt. Ein Vermerk ohne
+Bestätigung (Absturz, Stromausfall) landet beim nächsten Start in der Liste
+"Status unklar". Dort gibt es zwei Knöpfe: als erledigt vermerken oder erneut
+bearbeiten. Von allein wird nie ein zweites Mal gesendet.
+
+**Testmodus.** Ist er an (Vorbelegung), wird zweimal gefragt: einmal vor dem
+Erzeugen des Textes (Eintrag, geplante Formularfelder, Bild der Seite) und
+einmal vor dem Absenden (der fertige Text). Solange die erste Frage offen ist,
+steht der Eintrag auf "wartet_auf_freigabe" und gilt nicht als erledigt. Ein
+abgelehnter Vorgang bleibt offen und wird beim nächsten Mal wieder vorgelegt.
+
+**Anschreiben.** Der Anbieter steckt hinter einer Funktion
+(`service/text/base.py`), ein zweiter Anbieter ist eine Funktion und ein
+Eintrag mehr. Der Prompt kommt aus den Einstellungen und kennt die Platzhalter
+`{{seitentext}}`, `{{adresse}}`, `{{titel}}` und `{{wert:Bezeichnung}}`. Ein
+unbekannter Platzhalter ist ein Fehler und kein Text mit Klammern darin.
+Antwortet der Anbieter nicht, leer oder zu spät, wird nichts gesendet und nichts
+ersetzt.
+
+**Vorfälle.** Ein Vorfall liegt in `%APPDATA%\Zahnputztracker\incidents\` als
+eigener Ordner: `bericht.md` (lesbare Zusammenfassung), `daten.json`,
+`seite.html` (Kopie ohne Overlay und ohne Skripte), `bild.png`, `text.txt`. Der
+wichtigste Teil des Berichts ist die Liste der gefundenen und der erwarteten,
+aber nicht gefundenen Rollen. Bildsequenz, Trace-Archiv und Referenzwerte kommen
+mit der nächsten Ausbaustufe dazu.

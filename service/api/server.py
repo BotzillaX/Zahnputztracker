@@ -29,6 +29,7 @@ from fastapi.responses import FileResponse
 
 from .. import __version__
 from .. import atlas, runtime
+from .. import text as composer
 from ..engine import approval as engine_approval
 from ..engine import runner as engine_runner
 from ..engine import templates as engine_templates
@@ -36,7 +37,12 @@ from ..picker import picker
 from ..picker import snapshot as snapshot_view
 from ..registry import model as registry_model
 from ..registry import resolve as registry_resolve
+from ..flow import contact as contact_flow
+from ..flow import contract as flow_contract
+from ..flow import login as login_flow
+from ..flow import manager as flow_manager
 from ..registry import store as registry_store
+from ..telemetry import incidents
 from ..runtime import browser_install
 from ..storage import config as config_store
 from ..storage import database, secrets
@@ -183,6 +189,10 @@ def create_app(token: str) -> FastAPI:
             return {
                 "items": database.items(connection, status=database.STATUS_UNCLEAR),
                 "open_dispatches": database.open_dispatches(connection),
+                "decisions": [
+                    {"value": "kontaktiert", "label": "Als erledigt vermerken"},
+                    {"value": "erneut", "label": "Erneut bearbeiten"},
+                ],
             }
         finally:
             connection.close()
@@ -526,7 +536,9 @@ def create_app(token: str) -> FastAPI:
     async def approval_answer(body: Dict[str, Any] = Body(...)) -> dict:
         try:
             return engine_approval.gate.answer(
-                int(body.get("id") or 0), str(body.get("decision") or "")
+                int(body.get("id") or 0),
+                str(body.get("decision") or ""),
+                str(body.get("value") or ""),
             )
         except KeyError as error:
             raise HTTPException(status_code=409, detail=str(error.args[0])) from error
@@ -582,6 +594,116 @@ def create_app(token: str) -> FastAPI:
         bus.publish("template_applied", scope=scope, template=template_id,
                     version=stored["version"])
         return stored
+
+    @app.get("/approval/screenshot", dependencies=guard)
+    async def approval_screenshot():
+        """The picture that belongs to the open request, if there is one."""
+        target = contact_flow.screenshot_file()
+        if not target.is_file():
+            raise HTTPException(status_code=404, detail="Kein Bild vorhanden")
+        return FileResponse(target)
+
+    # -------------------------------------------------------------- one entry
+
+    @app.get("/flow", dependencies=guard)
+    async def flow_state() -> dict:
+        """What is running, and whether the taught roles are enough."""
+        document = registry_answer(lambda: registry_store.load(registry_model.SESSION))
+        answer = flow_manager.manager.state()
+        answer["readiness"] = flow_contract.readiness(document)
+        answer["review_mode"] = bool(config_store.load().get("review_mode", True))
+        return answer
+
+    @app.get("/flow/sign-in", dependencies=guard)
+    async def flow_sign_in_state() -> dict:
+        instance = live_page(registry_model.SESSION)
+        try:
+            return await login_flow.state(instance)
+        except Exception as error:  # noqa: BLE001 - reported as text
+            raise HTTPException(status_code=502, detail=str(error)) from error
+
+    @app.post("/flow/sign-in", dependencies=guard)
+    async def flow_sign_in() -> dict:
+        instance = live_page(registry_model.SESSION)
+        try:
+            return flow_manager.manager.start_login(instance)
+        except RuntimeError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+
+    @app.post("/flow/contact", dependencies=guard)
+    async def flow_contact(body: Dict[str, Any] = Body(...)) -> dict:
+        """Work through one entry whose address was handed over by hand."""
+        url = str(body.get("url") or "").strip()
+        if not url.lower().startswith(("http://", "https://")):
+            raise HTTPException(status_code=422, detail="Das ist keine gültige Adresse")
+        # Without a key from a result list the address is the key. It is
+        # what makes the entry unique, and it keeps the protection
+        # against sending twice working for a run started by hand.
+        key = str(body.get("key") or "").strip() or url
+        instance = live_page(registry_model.SESSION)
+        try:
+            return flow_manager.manager.start_contact(
+                instance, key, url, str(body.get("title") or "")
+            )
+        except RuntimeError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+
+    @app.post("/flow/stop", dependencies=guard)
+    async def flow_stop() -> dict:
+        return flow_manager.manager.stop()
+
+    @app.get("/text/help", dependencies=guard)
+    async def text_help() -> dict:
+        return {
+            "placeholders": [
+                {"name": name, "meaning": meaning}
+                for name, meaning in composer.PLACEHOLDER_HELP
+            ],
+            "providers": composer.providers(),
+        }
+
+    @app.post("/items/decision", dependencies=guard)
+    async def item_decide(body: Dict[str, Any] = Body(...)) -> dict:
+        """Decide an entry whose send was never confirmed (8.4).
+
+        The key travels in the body: it may be an address, and an address
+        does not belong in a path.
+        """
+        key = str(body.get("key") or "").strip()
+        if not key:
+            raise HTTPException(status_code=422, detail="Es fehlt die Kennung")
+        try:
+            return flow_manager.decide(key, str(body.get("decision") or ""))
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+
+    # ------------------------------------------------------------- incidents
+
+    @app.get("/incidents", dependencies=guard)
+    async def incident_list(limit: int = Query(default=100, ge=1, le=500)) -> dict:
+        return {"incidents": incidents.listing(limit)}
+
+    @app.get("/incidents/{incident}", dependencies=guard)
+    async def incident_read(incident: str) -> dict:
+        try:
+            return incidents.read(incident)
+        except (FileNotFoundError, ValueError) as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+
+    @app.get("/incidents/{incident}/file/{name}", dependencies=guard)
+    async def incident_file(incident: str, name: str):
+        try:
+            return FileResponse(incidents.file_of(incident, name))
+        except (FileNotFoundError, ValueError) as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+
+    @app.delete("/incidents/{incident}", dependencies=guard)
+    async def incident_forget(incident: str) -> dict:
+        try:
+            incidents.forget(incident)
+        except ValueError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        return {"removed": incident}
 
     # ----------------------------------------------------------- page catalogue
 

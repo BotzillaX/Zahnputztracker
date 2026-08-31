@@ -131,8 +131,11 @@ export const erkenneZustand = (bereich) =>
 export const fuehreKetteAus = (bereich) => request(`/states/${bereich}/run`, { method: "POST" });
 
 export const ladeFreigabe = () => request("/approval");
-export const beantworteFreigabe = (id, entscheidung) =>
-  request("/approval/answer", { method: "POST", body: { id, decision: entscheidung } });
+export const beantworteFreigabe = (id, entscheidung, eingabe) =>
+  request("/approval/answer", {
+    method: "POST",
+    body: { id, decision: entscheidung, value: eingabe ?? "" }
+  });
 
 export const ladeVariablen = () => request("/variables");
 export const oeffneVorgang = (kennung) =>
@@ -146,3 +149,18 @@ export const stelleVorlagenHer = () => request("/templates/reset", { method: "PO
 export const loescheVorlage = (id) => request(`/templates/${id}`, { method: "DELETE" });
 export const uebernimmVorlage = (id, bereich) =>
   request(`/templates/${id}/apply/${bereich}`, { method: "POST" });
+
+export const ladeAblauf = () => request("/flow");
+export const ladeAnmeldestand = () => request("/flow/sign-in");
+export const starteAnmeldung = () => request("/flow/sign-in", { method: "POST" });
+export const starteVorgang = (adresse, titel) =>
+  request("/flow/contact", { method: "POST", body: { url: adresse, title: titel ?? "" } });
+export const brichVorgangAb = () => request("/flow/stop", { method: "POST" });
+export const ladeTexthilfe = () => request("/text/help");
+
+export const entscheideEintrag = (kennung, entscheidung) =>
+  request("/items/decision", { method: "POST", body: { key: kennung, decision: entscheidung } });
+
+export const ladeVorfaelle = () => request("/incidents");
+export const ladeVorfall = (kennung) => request(`/incidents/${kennung}`);
+export const vergissVorfall = (kennung) => request(`/incidents/${kennung}`, { method: "DELETE" });

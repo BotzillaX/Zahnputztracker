@@ -109,8 +109,12 @@ def source_value(source: Dict[str, str], for_display: bool = True) -> str:
     raise EngineStop(f"Das Antwort-Paar '{name}' ist nicht hinterlegt")
 
 
-async def _single(page: Any, document: Dict[str, Any], role_id: str) -> Any:
-    """Mark the element of a role and return a locator for it."""
+async def element(page: Any, document: Dict[str, Any], role_id: str) -> Any:
+    """Mark the element of a role and return a locator for it.
+
+    Public because the flows of the next stage act on the same roles and
+    must fail in exactly the same way as an action does.
+    """
     role = _role(document, role_id)
     try:
         resolution = await registry_resolve.locate(page, role)
@@ -123,17 +127,17 @@ async def _single(page: Any, document: Dict[str, Any], role_id: str) -> Any:
     return registry_resolve.locator(page, resolution)
 
 
-async def _visible(page: Any, document: Dict[str, Any], role_id: str) -> bool:
+async def role_visible(page: Any, document: Dict[str, Any], role_id: str) -> bool:
     try:
         return await registry_resolve.present(page, _role(document, role_id))
     except UnknownState as error:
         raise EngineStop(str(error), kind="unknown_state") from error
 
 
-async def _wait_for(page: Any, document: Dict[str, Any], role_id: str, seconds: float, wanted: bool) -> None:
+async def wait_for_role(page: Any, document: Dict[str, Any], role_id: str, seconds: float, wanted: bool) -> None:
     deadline = time.monotonic() + seconds
     while True:
-        if await _visible(page, document, role_id) == wanted:
+        if await role_visible(page, document, role_id) == wanted:
             return
         if time.monotonic() >= deadline:
             label = _role(document, role_id)["label"]
@@ -142,7 +146,7 @@ async def _wait_for(page: Any, document: Dict[str, Any], role_id: str, seconds: 
         await asyncio.sleep(POLL_S)
 
 
-async def _set_choice(page: Any, locator: Any, value: str, label: str) -> str:
+async def set_choice(page: Any, locator: Any, value: str, label: str) -> str:
     """Set a dropdown, a checkbox or a radio button.
 
     Which of the three it is comes from the element itself. Anything else
@@ -185,14 +189,14 @@ async def perform(instance: Any, document: Dict[str, Any], action: Dict[str, Any
     kind = action["type"]
 
     if kind == "klicken":
-        locator = await _single(page, document, action["role"])
+        locator = await element(page, document, action["role"])
         await locator.click(timeout=ACTION_TIMEOUT_S * 1000)
         await registry_resolve.clear(page)
         return "geklickt"
 
     if kind == "text_eintragen":
         text = source_value(action["source"])
-        locator = await _single(page, document, action["role"])
+        locator = await element(page, document, action["role"])
         await locator.fill(text, timeout=ACTION_TIMEOUT_S * 1000)
         await registry_resolve.clear(page)
         secret = action["source"]["art"] == model.SOURCE_SECRET
@@ -200,8 +204,8 @@ async def perform(instance: Any, document: Dict[str, Any], action: Dict[str, Any
 
     if kind == "auswahl_setzen":
         label = _role(document, action["role"])["label"]
-        locator = await _single(page, document, action["role"])
-        result = await _set_choice(page, locator, action["value"], label)
+        locator = await element(page, document, action["role"])
+        result = await set_choice(page, locator, action["value"], label)
         await registry_resolve.clear(page)
         return result
 
@@ -214,17 +218,17 @@ async def perform(instance: Any, document: Dict[str, Any], action: Dict[str, Any
         return f"geöffnet: {reached}"
 
     if kind == "scrollen_zu":
-        locator = await _single(page, document, action["role"])
+        locator = await element(page, document, action["role"])
         await locator.scroll_into_view_if_needed(timeout=ACTION_TIMEOUT_S * 1000)
         await registry_resolve.clear(page)
         return "in den sichtbaren Bereich geholt"
 
     if kind == "warten_sichtbar":
-        await _wait_for(page, document, action["role"], action["seconds"], True)
+        await wait_for_role(page, document, action["role"], action["seconds"], True)
         return "ist sichtbar"
 
     if kind == "warten_verschwunden":
-        await _wait_for(page, document, action["role"], action["seconds"], False)
+        await wait_for_role(page, document, action["role"], action["seconds"], False)
         return "ist verschwunden"
 
     if kind == "warten":
@@ -268,7 +272,7 @@ async def _permission(action: Dict[str, Any], description: str, state: Dict[str,
     mode = action["mode"]
     if mode == model.MODE_AUTOMATIC:
         return True
-    decision = await gate.ask(
+    answer = await gate.ask(
         {
             "mode": mode,
             "scope": scope,
@@ -278,6 +282,7 @@ async def _permission(action: Dict[str, Any], description: str, state: Dict[str,
             "description": description,
         }
     )
+    decision = answer["decision"]
     if mode == model.MODE_APPROVAL:
         if decision == ALLOWED:
             return True
@@ -386,8 +391,12 @@ def open_run(key: str = "") -> Dict[str, Any]:
 __all__ = [
     "EngineStop",
     "MAX_ROUNDS",
+    "element",
     "open_run",
     "perform",
+    "role_visible",
+    "set_choice",
+    "wait_for_role",
     "run_chain",
     "run_once",
     "source_value",

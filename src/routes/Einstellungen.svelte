@@ -3,18 +3,25 @@
   import Feld from "../lib/components/Feld.svelte";
   import PaarListe from "../lib/components/PaarListe.svelte";
   import Geheimnis from "../lib/components/Geheimnis.svelte";
-  import { ladeEinstellungen, speichereEinstellungen, ladeGeheimnisse } from "../lib/api/service.js";
+  import {
+    ladeEinstellungen,
+    speichereEinstellungen,
+    ladeGeheimnisse,
+    ladeTexthilfe
+  } from "../lib/api/service.js";
 
   let daten = $state(null);
   let geheimnisse = $state([]);
   let fehler = $state("");
   let meldung = $state("");
   let laedt = $state(true);
+  let platzhalter = $state([]);
 
   onMount(async () => {
     try {
       daten = await ladeEinstellungen();
       geheimnisse = await ladeGeheimnisse();
+      platzhalter = (await ladeTexthilfe()).placeholders;
     } catch (e) {
       fehler = String(e.message ?? e);
     } finally {
@@ -141,8 +148,17 @@
             onchange={geheimnisseNeu}
           />
         </div>
-        <Feld label="Vorlage für den Text" breit hinweis="Platzhalter werden später ergänzt.">
+        <Feld
+          label="Vorlage für den Text"
+          breit
+          hinweis="Ein unbekannter Platzhalter hält den Vorgang an, statt in Klammern im Text zu landen."
+        >
           <textarea rows="6" bind:value={daten.composer.prompt}></textarea>
+          <ul class="platzhalter">
+            {#each platzhalter as p}
+              <li><code>{p.name}</code> {p.meaning}</li>
+            {/each}
+          </ul>
         </Feld>
       </div>
     </section>
@@ -225,6 +241,8 @@
 {/if}
 
 <style>
+  .platzhalter { list-style: none; padding: 0; margin: 6px 0 0; font-size: 11px; color: var(--muted); }
+  .platzhalter code { margin-right: 6px; }
   .seite { display: flex; flex-direction: column; gap: 28px; padding-bottom: 60px; }
   section { display: flex; flex-direction: column; gap: 10px; }
   h2 {

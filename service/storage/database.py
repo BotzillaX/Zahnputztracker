@@ -198,6 +198,16 @@ def mark_dispatch_confirmed(connection: sqlite3.Connection, key: str) -> None:
     connection.execute("UPDATE dispatch SET confirmed_at = ? WHERE key = ?", (now(), key))
 
 
+def clear_dispatch(connection: sqlite3.Connection, key: str) -> None:
+    """Drop a marker without claiming the send happened.
+
+    Used when the user decides that an unconfirmed send is to be tried
+    again: the entry goes back into the queue and must not carry a
+    confirmation it never got.
+    """
+    connection.execute("DELETE FROM dispatch WHERE key = ?", (key,))
+
+
 def open_dispatches(connection: sqlite3.Connection) -> List[Dict[str, Any]]:
     """Sends that were started but never confirmed."""
     rows = connection.execute(

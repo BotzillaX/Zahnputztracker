@@ -5,6 +5,7 @@
     exportiereRegistrierung,
     freieKennung,
     importiereRegistrierung,
+    ladeEinstellungen,
     ladePicker,
     ladeRegistrierung,
     ladeVersionen,
@@ -39,6 +40,8 @@
   let neuerName = $state("");
   let menge = $state("einzel");
   let kennungstraeger = $state("");
+  let antwort = $state("");
+  let antworten = $state([]);
   let notiz = $state("");
   let behalten = $state([]);
 
@@ -51,6 +54,14 @@
     alles();
     const takt = setInterval(pickerStand, 1500);
     return () => clearInterval(takt);
+  });
+
+  onMount(async () => {
+    try {
+      antworten = (await ladeEinstellungen()).answers ?? [];
+    } catch (e) {
+      antworten = [];
+    }
   });
 
   $effect(() => {
@@ -91,6 +102,7 @@
     menge = "einzel";
     notiz = "";
     kennungstraeger = "";
+    antwort = "";
     neuerName = "";
     behalten = (picker.pick?.element?.candidates ?? []).map(() => true);
     try {
@@ -181,6 +193,8 @@
         menge,
         notes: notiz || vorhanden?.notes || "",
         key_attribute: kennungstraeger,
+        // Welches Antwort-Paar dieses Feld fuellt (Spec 8.3).
+        answer: antwort || vorhanden?.answer || "",
         options: element?.options ?? [],
         candidates: merkmale
       };
@@ -284,6 +298,15 @@
               {/each}
             </select>
           </label>
+          <label>
+            Antwort-Paar (für Formularfelder)
+            <select bind:value={antwort}>
+              <option value="">(keines, Feld bleibt leer)</option>
+              {#each antworten as a}
+                <option value={a.label}>{a.label}</option>
+              {/each}
+            </select>
+          </label>
         </div>
 
         <label class="voll">
@@ -337,6 +360,7 @@
             <span class="muted">{r.menge}</span>
             <span class="muted">{r.candidates.length} Merkmale</span>
             {#if r.key_attribute}<span class="muted">Kennung: {r.key_attribute}</span>{/if}
+            {#if r.answer}<span class="muted">Antwort: {r.answer}</span>{/if}
             {#if befund(r.id)}
               {#if befund(r.id).ambiguous}
                 <span class="bad">mehrdeutig</span>
