@@ -7,9 +7,11 @@
     ladeAnmeldestand,
     ladeDiagnose,
     ladeEintraege,
+    ladeSuchlauf,
     ladeUnklare,
     restartService,
     starteAnmeldung,
+    starteSuchlauf,
     starteVorgang
   } from "../lib/api/service.js";
   import { events } from "../lib/stores/service.js";
@@ -19,6 +21,7 @@
   let bestand = $state(null);
   let unklar = $state(null);
   let diagnose = $state(null);
+  let suchlauf = $state(null);
   let adresse = $state("");
   let titel = $state("");
   let filter = $state("");
@@ -40,6 +43,7 @@
       bestand = await ladeEintraege(filter || undefined);
       unklar = await ladeUnklare();
       diagnose = await ladeDiagnose();
+      suchlauf = await ladeSuchlauf();
     } catch (e) {
       fehler = String(e.message ?? e);
     }
@@ -65,6 +69,12 @@
     });
 
   const anmelden = () => fuehreAus("anmelden", starteAnmeldung);
+
+  const suchlaufStarten = () =>
+    fuehreAus("suchlauf", async () => {
+      await starteSuchlauf();
+      meldung = "Der Suchlauf läuft. Er hält nur an, wenn du ihn anhältst.";
+    });
   const abbrechen = () => fuehreAus("abbrechen", brichVorgangAb);
 
   const vorgangStarten = () =>
@@ -93,7 +103,72 @@
   {#if meldung}<p class="muted">{meldung}</p>{/if}
 
   <section>
-    <h2>Vorgang</h2>
+    <h2>Suchlauf</h2>
+    {#if suchlauf?.state?.running}
+      <p>
+        Zyklus <strong>{suchlauf.state.cycles}</strong>
+        {#if suchlauf.state.current}
+          — bearbeitet gerade <strong>{suchlauf.state.current}</strong>
+        {:else if suchlauf.state.waiting_s > 0}
+          — wartet noch {suchlauf.state.waiting_s} s
+        {/if}
+      </p>
+      <p class="muted klein">
+        Zuletzt {suchlauf.state.last_seen} Einträge gesehen, davon {suchlauf.state.last_new} neu.
+        Insgesamt {suchlauf.state.contacted} kontaktiert.
+        {#if suchlauf.state.unreadable}
+          <span class="warnung">
+            {suchlauf.state.unreadable} Verweis(e) ohne erkennbare Kennung (Adressvorlage prüfen).
+          </span>
+        {/if}
+      </p>
+      {#if suchlauf.state.queue.length}
+        <p class="muted klein">Noch offen in diesem Zyklus: {suchlauf.state.queue.join(", ")}</p>
+      {/if}
+      {#if suchlauf.state.deferred.length}
+        <p class="muted klein">
+          In diesem Lauf zurückgestellt:
+          {suchlauf.state.deferred.map((e) => `${e.key} (${e.reason})`).join(", ")}
+        </p>
+      {/if}
+      <button onclick={abbrechen} disabled={beschaeftigt === "abbrechen"}>Suchlauf anhalten</button>
+    {:else}
+      <div class="knoepfe">
+        <button onclick={suchlaufStarten} disabled={ablauf?.busy || beschaeftigt === "suchlauf"}>
+          Suchlauf starten
+        </button>
+      </div>
+      {#if suchlauf?.readiness}
+        <ul class="pruefung">
+          <li class:offen={!suchlauf.readiness.address}>Adresse der Ergebnisseite</li>
+          <li class:offen={!suchlauf.readiness.template}>
+            Adressvorlage mit Platzhalter {suchlauf.readiness.placeholder}
+          </li>
+          <li class:offen={!suchlauf.readiness.taught}>
+            {suchlauf.readiness.meaning} im Such-Browser
+          </li>
+          <li class:offen={suchlauf.readiness.taught && !suchlauf.readiness.many}>
+            Diese Rolle mit der Menge „liste"
+          </li>
+        </ul>
+        <p class="muted klein">
+          Wartezeit je Zyklus {suchlauf.readiness.wait[0]} bis {suchlauf.readiness.wait[1]} s,
+          Verhaltens-Simulation {suchlauf.readiness.idle_behavior ? "an" : "aus"}.
+        </p>
+      {/if}
+      {#if suchlauf?.state?.stopped}
+        <p class="bad">Angehalten: {suchlauf.state.stopped}</p>
+      {/if}
+      {#if suchlauf?.state?.cycles}
+        <p class="muted klein">
+          Letzter Lauf: {suchlauf.state.cycles} Zyklen, {suchlauf.state.contacted} kontaktiert.
+        </p>
+      {/if}
+    {/if}
+  </section>
+
+  <section>
+    <h2>Einzelner Vorgang</h2>
     {#if ablauf?.busy}
       <p>
         Läuft: <strong>{ablauf.job?.kind}</strong>
@@ -286,6 +361,11 @@
   .klein { font-size: 12px; margin: 4px 0 0; }
   .bad, .fehler { color: var(--bad); font-size: 13px; }
   .warnung { color: var(--warn); font-size: 12px; }
+  .pruefung { list-style: none; padding: 0; margin: 8px 0 0; font-size: 12px; }
+  .pruefung li { padding: 2px 0; border: 0; color: var(--ok); }
+  .pruefung li::before { content: "erledigt  "; color: var(--muted); }
+  .pruefung li.offen { color: var(--warn); }
+  .pruefung li.offen::before { content: "offen  "; }
   table { width: 100%; border-collapse: collapse; font-size: 12px; }
   td { padding: 3px 8px 3px 0; border-bottom: 1px solid var(--line); vertical-align: top; }
   td.lang { max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

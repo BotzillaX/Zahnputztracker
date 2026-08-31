@@ -460,3 +460,65 @@ Datenträgers nicht stehen bleiben.
 Markdown ist Ausgabeformat, kein Speicherformat. Der Bericht wird auf
 Knopfdruck aus der Tagesdatei erzeugt und liegt unter `reports\`. Er lässt
 sich für jeden noch vorhandenen Tag erneut erzeugen.
+
+## Der Suchzyklus (Phase 7)
+
+Der Suchlauf ist ein einziger, langer Auftrag. Er läuft, bis er angehalten
+wird, und arbeitet immer denselben Zyklus ab:
+
+1. Ergebnisseite neu laden (`search.reload`)
+2. Zufällige Wartezeit zwischen dem eingestellten Minimum und Maximum
+3. Gesamte sichtbare Trefferliste lesen (`search.parse_results`)
+4. Kennungen gegen die Datenbank abgleichen
+5. Jeden neuen Eintrag übergeben und vollständig bearbeiten
+6. Erst danach der nächste Zyklus
+
+Ausgewertet wird die **ganze** sichtbare Liste, nie eine feste Anzahl
+oberster Zeilen: mehrere Einträge werden regelmäßig gleichzeitig
+eingestellt. Die Liste steht neueste zuerst, bearbeitet wird deshalb in
+umgekehrter Reihenfolge (ältester neuer Eintrag zuerst, weil er die
+geringste Restzeit hat).
+
+### Die Kennung eines Eintrags
+
+Die Trefferliste liefert Verweise. Um zu entscheiden, ob ein Eintrag schon
+bearbeitet wurde, muss aus dem Verweis etwas Stabiles werden: ganze
+Adressen tragen Parameter, die sich von Aufruf zu Aufruf unterscheiden.
+
+Die Regel dafür kommt nicht aus dem Code, sondern aus der Adressvorlage in
+den Einstellungen. Sie enthält genau einen Platzhalter `{kennung}`; was an
+seiner Stelle steht, ist die Kennung. Damit steht keine Spur der Zielseite
+im Repository, und die Regel lässt sich an einem einzigen Feld ändern.
+
+Ein Verweis, auf den die Vorlage nicht passt, wird **nicht** gedeutet. Er
+wird gezählt und gemeldet („Verweise ohne erkennbare Kennung"), der
+Eintrag dahinter bleibt liegen. Eine geratene Kennung könnte dazu führen,
+dass derselbe Eintrag zweimal angeschrieben wird, und das ist der eine
+Fehler, den diese Anwendung nicht machen darf.
+
+Die Rolle `item_link` wird mit der Menge `liste` angelernt und darf auf
+dem Verweis selbst oder auf der Zeile sitzen, die ihn enthält. Enthält
+eine Zeile mehrere Verweise, wird keiner davon ausgewählt, sondern die
+Zeile übersprungen und gezählt.
+
+### Anhalten und Zurückstellen
+
+Der Zyklus wartet (er scheitert nicht), solange eine Freigabe offen ist
+oder der Betrieb pausiert. Beides zählt nicht als Fehler.
+
+Scheitert ein Zyklus, wird das gezählt und nach einer kurzen Pause erneut
+versucht. Nach drei Fehlschlägen in Folge hält der Suchlauf an und
+benachrichtigt: das ist eine Lage, die ein Mensch ansehen muss.
+
+Ein Eintrag, der ohne abschließenden Status endet (Fehler, abgelehnte
+Freigabe, kein Text erzeugt), wird für den laufenden Suchlauf
+zurückgestellt und in der Oberfläche mit Grund angezeigt. Sonst würde ein
+einziger dauerhaft scheiternder Eintrag jeden folgenden Zyklus belegen.
+Beim nächsten Start des Suchlaufs wird er wieder angeboten.
+
+### Verhaltens-Simulation
+
+Optional (Vorbelegung aus, eigener Vorgang `search.idle_behavior`).
+Während der Wartezeit im Such-Browser kleine, zufällige Scrollbewegungen,
+nie ein Klick: ein Klick könnte etwas öffnen, und dieser Browser soll nur
+eine Liste lesen.

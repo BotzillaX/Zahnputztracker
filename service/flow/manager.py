@@ -20,6 +20,7 @@ from ..storage import database
 from ..telemetry import tracing
 from . import contact as contact_flow
 from . import login as login_flow
+from . import search as search_flow
 
 
 def _now() -> str:
@@ -37,7 +38,8 @@ class Manager:
         return self._task is not None and not self._task.done()
 
     def state(self) -> Dict[str, Any]:
-        return {"busy": self.busy, "job": self.job, "last": self.last}
+        return {"busy": self.busy, "job": self.job, "last": self.last,
+                "search": search_flow.loop.state()}
 
     def _guard(self) -> None:
         if self.busy:
@@ -94,6 +96,23 @@ class Manager:
             return await contact_flow.contact(instance, key, url, title)
 
         self._task = asyncio.create_task(self._wrap("vorgang", work, instance))
+        return self.state()
+
+    def start_search(self, search_instance: Any, session_instance: Any) -> Dict[str, Any]:
+        """The search cycle, running until it is stopped (5.5).
+
+        The cycle is one long job, not one job per entry: it records its
+        own recordings per cycle and per contacted entry, so the wrapper
+        here keeps out of the tracing.
+        """
+        self._guard()
+        search_flow.loop.check(search_instance)
+        self.job = {"kind": "suchlauf", "scope": search_instance.role, "started": _now()}
+        bus.publish("flow_started", kind="suchlauf", scope=search_instance.role)
+        self._task = asyncio.create_task(
+            self._wrap("suchlauf",
+                       lambda: search_flow.loop.run(search_instance, session_instance))
+        )
         return self.state()
 
     def stop(self) -> Dict[str, Any]:

@@ -13,6 +13,11 @@ import tempfile
 # local directory stays real, the browser binary lives there.
 _temp = tempfile.mkdtemp(prefix="zt-picker-")
 os.environ["APPDATA"] = _temp
+# Auch die Browser-Profile liegen im Testordner: eine Pruefung darf das
+# echte, angemeldete Sitzungsprofil weder benutzen noch veraendern. Nur
+# der Browser selbst wird dort gesucht, wo er wirklich liegt (siehe main).
+_echtes_lokal = os.environ.get("LOCALAPPDATA", "")
+os.environ["LOCALAPPDATA"] = _temp + "-lokal"
 
 from ..api.events import bus  # noqa: E402
 from ..atlas import catalog  # noqa: E402
@@ -72,7 +77,9 @@ ZWEITE_SEITE = "<html><body><main><p>Andere Ansicht</p><button>Zurueck</button><
 async def main():
     from playwright.async_api import async_playwright
 
+    os.environ["LOCALAPPDATA"] = _echtes_lokal
     programm = browser_install.executable()
+    os.environ["LOCALAPPDATA"] = _temp + "-lokal"
     if programm is None:
         print("  Der Browser ist nicht geladen, Pruefung nicht moeglich")
         raise SystemExit(1)

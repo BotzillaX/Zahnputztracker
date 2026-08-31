@@ -22,6 +22,12 @@ SIGN_IN_SUBMIT = "primary_action_a"
 SECOND_FACTOR_MARKER = "second_factor_marker"
 SECOND_FACTOR_FIELD = "second_factor_field"
 
+# ------------------------------------------------------- the result list
+# One role, taught with quantity "liste": it marks every entry of the
+# visible result list at once. The address behind an entry becomes its
+# identifier through the template in the settings (see keys.py).
+ITEM_LINK = "item_link"
+
 # --------------------------------------------------------------- one item
 READY_MARKER = "ready_marker"
 ALREADY_MARKER = "already_marker"
@@ -42,8 +48,10 @@ FORM_FIELD_PREFIX = "form_field"
 # absent optional role simply means that step does not apply.
 REQUIRED_SIGN_IN = (SIGNED_IN, IDENTITY_FIELD, SECRET_FIELD, SIGN_IN_SUBMIT)
 REQUIRED_CONTACT = (READY_MARKER, MESSAGE_FIELD, SUBMIT_ACTION)
+REQUIRED_SEARCH = (ITEM_LINK,)
 
 LABELS = {
+    ITEM_LINK: "Verweis eines Eintrags der Trefferliste",
     SIGNED_IN: "Merkmal für den angemeldeten Zustand",
     SIGN_IN_ENTRY: "Einstieg in die Anmeldung",
     IDENTITY_FIELD: "Feld für die Kennung",
@@ -112,4 +120,22 @@ def readiness(document: Dict[str, Any]) -> Dict[str, Any]:
         "fields": fields,
         "missing_sign_in": missing(document, REQUIRED_SIGN_IN),
         "missing_contact": missing(document, REQUIRED_CONTACT),
+    }
+
+
+def search_readiness(document: Dict[str, Any]) -> Dict[str, Any]:
+    """What the search cycle needs, read from the search browser.
+
+    Its one role lives in the other registry, so it is asked for
+    separately instead of being mixed into the report above.
+    """
+    role = roles_of(document).get(ITEM_LINK)
+    return {
+        "role": ITEM_LINK,
+        "meaning": LABELS[ITEM_LINK],
+        "label": role["label"] if role else "",
+        "present": role is not None,
+        "taught": taught(role),
+        "many": bool(role and role.get("menge") == "liste"),
+        "missing_search": missing(document, REQUIRED_SEARCH),
     }

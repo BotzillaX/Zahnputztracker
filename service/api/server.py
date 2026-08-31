@@ -42,6 +42,7 @@ from ..flow import contact as contact_flow
 from ..flow import contract as flow_contract
 from ..flow import login as login_flow
 from ..flow import manager as flow_manager
+from ..flow import search as search_flow
 from ..registry import store as registry_store
 from ..telemetry import (
     frames,
@@ -642,7 +643,32 @@ def create_app(token: str) -> FastAPI:
         answer = flow_manager.manager.state()
         answer["readiness"] = flow_contract.readiness(document)
         answer["review_mode"] = bool(config_store.load().get("review_mode", True))
+        answer["search_readiness"] = search_flow.readiness(
+            registry_answer(lambda: registry_store.load(registry_model.SEARCH))
+        )
         return answer
+
+    @app.get("/flow/search", dependencies=guard)
+    async def flow_search_state() -> dict:
+        """The search cycle: what it did, and what it still needs."""
+        return {
+            "state": search_flow.loop.state(),
+            "readiness": search_flow.readiness(
+                registry_answer(lambda: registry_store.load(registry_model.SEARCH))
+            ),
+        }
+
+    @app.post("/flow/search", dependencies=guard)
+    async def flow_search_start() -> dict:
+        """Start the cycle. Both browsers have to be up for it."""
+        search_instance = live_page(registry_model.SEARCH)
+        session_instance = live_page(registry_model.SESSION)
+        try:
+            return flow_manager.manager.start_search(search_instance, session_instance)
+        except search_flow.SearchError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+        except RuntimeError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
 
     @app.get("/flow/sign-in", dependencies=guard)
     async def flow_sign_in_state() -> dict:

@@ -155,6 +155,8 @@ export const ladeAnmeldestand = () => request("/flow/sign-in");
 export const starteAnmeldung = () => request("/flow/sign-in", { method: "POST" });
 export const starteVorgang = (adresse, titel) =>
   request("/flow/contact", { method: "POST", body: { url: adresse, title: titel ?? "" } });
+export const ladeSuchlauf = () => request("/flow/search");
+export const starteSuchlauf = () => request("/flow/search", { method: "POST" });
 export const brichVorgangAb = () => request("/flow/stop", { method: "POST" });
 export const ladeTexthilfe = () => request("/text/help");
 
