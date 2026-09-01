@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { pushEvent, serviceStatus } from "../stores/service.js";
+import { pushEvent, serviceStatus, updateStand } from "../stores/service.js";
 import { signalton } from "../ton.js";
 import { endpoint, request } from "./client.js";
 
@@ -47,6 +47,8 @@ export async function initService() {
       connectStream().catch(() => scheduleReconnect());
     }
   });
+  await listen("update-status", (message) => updateStand.set(message.payload));
+  invoke("update_state").then((stand) => updateStand.set(stand)).catch(() => {});
   const current = await invoke("service_status");
   serviceStatus.set(current);
   if (current.state === "verbunden") await connectStream();
@@ -55,6 +57,12 @@ export async function initService() {
 export const health = () => request("/health");
 export const sendPing = () => request("/ping", { method: "POST" });
 export const restartService = () => invoke("service_restart");
+
+/** Update-Knopf (Spezifikation 13). Alles davon laeuft ueber den Kern. */
+export const ladeUpdateStand = () => invoke("update_state");
+export const pruefeUpdate = () => invoke("update_check");
+export const ladeUpdateLage = () => invoke("update_situation");
+export const starteUpdate = () => invoke("update_install");
 
 export const ladeEinstellungen = () => request("/config");
 export const speichereEinstellungen = (daten) =>

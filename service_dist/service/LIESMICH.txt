@@ -1,0 +1,8 @@
+Dieser Ordner nimmt den gebauten Dienst auf.
+
+Gefuellt wird er von scripts/dienst_bauen.py (PyInstaller). Der Kern
+erwartet darin service.exe und legt den ganzen Ordner als Beigabe in
+das fertige Programm.
+
+Die Datei hier haelt nur den Ordner vorhanden, damit der Bau auch in
+einer frischen Kopie des Projekts durchlaeuft. Sie darf bleiben.

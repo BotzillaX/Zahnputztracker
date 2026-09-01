@@ -1,0 +1,72 @@
+name: Release
+
+# Runs when a version tag is pushed. Builds the service, builds the
+# application, signs the installer and puts a draft release together.
+# The draft is published by hand, so nothing reaches anybody by accident.
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Abhaengigkeiten
+        run: |
+          npm ci
+          python -m pip install --upgrade pip
+          python -m pip install -r service/requirements.txt pyinstaller
+
+      - name: Wortliste
+        # The word list lives outside the repository, so this step can
+        # only run when it was made available as a secret. Without it
+        # the check is skipped, deliberately and visibly.
+        env:
+          WORTLISTE: ${{ secrets.WORTLISTE }}
+        run: |
+          if ($env:WORTLISTE) {
+            New-Item -ItemType Directory -Force privat | Out-Null
+            $env:WORTLISTE | Out-File -Encoding utf8 privat/wortliste.txt
+            python scripts/tarnung.py
+          } else {
+            Write-Host "Keine Wortliste hinterlegt, Pruefung uebersprungen."
+          }
+
+      - name: Dienst packen
+        run: python scripts/dienst_bauen.py
+
+      - name: Anwendung bauen und unterschreiben
+        uses: tauri-apps/tauri-action@v0
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: ${{ github.ref_name }}
+          releaseDraft: true
+          prerelease: false
+          includeUpdaterJson: true
+          updaterJsonPreferNsis: true

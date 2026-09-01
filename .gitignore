@@ -13,7 +13,10 @@ __pycache__/
 *.py[cod]
 .venv/
 build/
-service_dist/
+service_dist/*
+!service_dist/service/
+service_dist/service/*
+!service_dist/service/LIESMICH.txt
 *.spec
 
 # editors / os

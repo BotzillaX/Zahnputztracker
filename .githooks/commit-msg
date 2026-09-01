@@ -1,0 +1,8 @@
+#!/bin/sh
+# Auch die Commit-Nachricht wird geprueft (Spezifikation 14).
+if [ -x ".venv/Scripts/python.exe" ]; then
+  PY=".venv/Scripts/python.exe"
+else
+  PY="python"
+fi
+exec "$PY" scripts/tarnung.py --nachricht "$1"

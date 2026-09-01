@@ -590,3 +590,91 @@ keiner fremden Quelle). Ob er klingt, entscheidet der Dienst anhand der
 Einstellung und hängt es an die Meldung; die Oberfläche spielt nur ab.
 Geht das Abspielen nicht (stummer Rechner, gesperrte Wiedergabe), wird
 der Fehler geschluckt: die Meldung steht ohnehin sichtbar da.
+
+## Ausliefern und Aktualisieren (Phase 9)
+
+### Zwei Bauschritte, ein Ergebnis
+
+Der Dienst wird zuerst mit PyInstaller zu einem eigenständigen Ordner
+gepackt (`scripts/dienst_bauen.py` nach `service_dist/service/`), danach
+baut Tauri das Installationsprogramm und nimmt diesen Ordner als Beigabe
+mit. Der Kern sucht ihn im fertigen Programm unter
+`<Ressourcen>/service/service.exe`, genau dort, wo Tauri ihn ablegt.
+
+Zwei Dinge, die leicht falsch laufen und spät auffallen:
+
+- Der gepackte Dienst behält bewusst einen Konsolenkanal. Der Kern
+  übergibt das Token über die Standardeingabe und liest die Antwort von
+  der Standardausgabe. Ein fensterloser Bau hätte beides nicht, und der
+  Handschlag würde ohne jede Meldung scheitern. Kein Fenster erscheint
+  trotzdem: der Kern startet den Prozess ohne Konsole.
+- Das Overlay ist eine Textdatei neben ihrem Modul, kein Code. Sie wird
+  ausdrücklich mitgenommen und der Bau bricht ab, wenn sie im Ergebnis
+  fehlt. Sonst startet das gepackte Programm und der Auswahlmodus wäre
+  einfach weg.
+
+Ein Platzhalter hält den Zielordner vorhanden, damit auch eine frische
+Kopie des Projekts baut, bevor der Dienst je gepackt wurde.
+
+### Der Updater
+
+Fünf Sekunden nach dem Start und danach alle sechs Stunden wird die
+Beschreibungsdatei des jüngsten Releases gelesen, mehr nicht. Vor einem
+Klick wird nichts heruntergeladen.
+
+Der Knopf hat sieben Erscheinungen: die sechs aus der Spezifikation und
+zusätzlich `nicht_eingerichtet`. Das ist kein Fehlerzustand, sondern die
+ehrliche Aussage, dass in der Konfiguration noch Platzhalter statt Konto
+und öffentlichem Schlüssel stehen. Ein Fehler, den niemand beheben kann,
+wäre die schlechtere Anzeige.
+
+Ein fehlgeschlagener Hintergrundlauf leuchtet nicht. Er stellt den Knopf
+auf den Stand von vorher zurück und legt den Grund als Hinweis dahinter,
+der beim Überfahren erscheint. Nur eine erzwungene Prüfung zeigt einen
+Fehler offen an: dort hat jemand gefragt und verdient eine Antwort.
+
+### Der Weg vor der Installation
+
+Erst nach dem Klick, und in dieser Reihenfolge:
+
+1. Der Dienst wird gefragt, was läuft. Läuft ein Vorgang oder ist ein
+   Browser offen, kommt eine Rückfrage.
+2. Der Ablauf wird angehalten.
+3. Beide Browser werden geschlossen, und es wird gewartet, bis sie
+   wirklich weg sind (bis zu zwanzig Sekunden).
+4. Erst dann wird der Dienst beendet, und zwar endgültig: eine Sperre
+   hält die Prozessaufsicht davon ab, ihn wieder zu starten. Genau das
+   darf während einer Installation nicht passieren.
+5. Herunterladen mit Fortschritt, Unterschrift prüfen, installieren,
+   neu starten.
+
+Schritt 3 ist verpflichtend und nicht abkürzbar: ein hart beendeter
+Browser hinterlässt verwaiste Prozesse und gesperrte Profilordner.
+
+Ohne gültige Unterschrift wird nichts installiert. Das ist keine
+Einstellung, sondern die eingebaute Regel des Updaters.
+
+### Das Browser-Programm
+
+Getrennt davon, in den Einstellungen, mit ruhigerer Anzeige und ohne
+Neustart der Anwendung. Es benutzt denselben Weg wie die Erstinstallation
+des Browsers, nur mit dem Zusatz, eine vorhandene Fassung zu ersetzen.
+
+### Die Wortlistenprüfung
+
+`scripts/tarnung.py` prüft Dateien und Commit-Nachricht gegen eine Liste
+von Wörtern, die im Repository nicht vorkommen dürfen. Die Wörter stehen
+ausschließlich in `privat/wortliste.txt` und damit nie im Repository:
+eine Prüfliste, die selbst eingecheckt ist, wäre ihr eigener Treffer.
+
+Fehlt die Liste, wird nicht geprüft und die Prüfung schlägt fehl. Eine
+Prüfung, die bei fehlender Grundlage still durchwinkt, ist schlechter
+als gar keine.
+
+Zeilen mit `re:` sind reguläre Ausdrücke. Das braucht es dort, wo ein
+harmloses technisches Wort ein verdächtiges enthält (`expose_binding`
+aus Playwright gegen den Begriff selbst).
+
+Eingeschaltet wird das einmal mit `git config core.hooksPath .githooks`.
+Zwei Haken greifen: einer vor dem Commit für die vorgemerkten Dateien,
+einer für die Nachricht.

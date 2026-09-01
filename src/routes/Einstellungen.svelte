@@ -3,6 +3,7 @@
   import Feld from "../lib/components/Feld.svelte";
   import PaarListe from "../lib/components/PaarListe.svelte";
   import Geheimnis from "../lib/components/Geheimnis.svelte";
+  import Programm from "../lib/components/Programm.svelte";
   import {
     ladeEinstellungen,
     speichereEinstellungen,
@@ -56,6 +57,8 @@
   <p class="fehler">{fehler || "Einstellungen nicht verfügbar."}</p>
 {:else}
   <div class="seite">
+    <Programm />
+
     <section>
       <h2>Zugang</h2>
       <div class="raster">

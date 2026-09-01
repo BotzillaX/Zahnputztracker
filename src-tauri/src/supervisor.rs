@@ -94,6 +94,10 @@ pub struct Supervisor {
     endpoint: Mutex<Option<Endpoint>>,
     child: Mutex<Option<Child>>,
     status: Mutex<Status>,
+    /// Set before an installation. From then on the watchdog leaves the
+    /// service alone, because starting it again is exactly what must not
+    /// happen while the program is being replaced.
+    halted: Mutex<bool>,
 }
 
 impl Supervisor {
@@ -105,7 +109,12 @@ impl Supervisor {
                 state: "startet",
                 detail: String::new(),
             }),
+            halted: Mutex::new(false),
         }
+    }
+
+    pub fn halted(&self) -> bool {
+        *self.halted.lock().unwrap()
     }
 
     pub fn endpoint(&self) -> Option<Endpoint> {
@@ -334,6 +343,10 @@ pub fn launch(app: AppHandle) {
 
         let mut failures = 0u32;
         loop {
+            if supervisor.halted() {
+                std::thread::sleep(PROBE_INTERVAL);
+                continue;
+            }
             match supervisor.endpoint() {
                 None => {
                     supervisor.publish(&app, "startet", "");
@@ -382,6 +395,17 @@ pub fn launch(app: AppHandle) {
 
 /// Force a restart: the watchdog picks the service up again immediately.
 pub fn restart(supervisor: &Supervisor) {
+    *supervisor.endpoint.lock().unwrap() = None;
+    stop(supervisor);
+}
+
+/// End the service for good: it is not started again after this.
+///
+/// Used before an installation. The browsers are closed by the caller
+/// beforehand, because a service that is simply killed leaves orphaned
+/// browser processes and locked profile directories behind (13.5).
+pub fn halt(supervisor: &Supervisor) {
+    *supervisor.halted.lock().unwrap() = true;
     *supervisor.endpoint.lock().unwrap() = None;
     stop(supervisor);
 }
