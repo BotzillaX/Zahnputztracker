@@ -35,6 +35,7 @@ from ..engine import approval as engine_approval
 from ..engine import runner as engine_runner
 from ..engine import templates as engine_templates
 from ..picker import picker
+from ..picker import session as picker_session
 from ..picker import snapshot as snapshot_view
 from ..registry import model as registry_model
 from ..registry import resolve as registry_resolve
@@ -371,6 +372,16 @@ def create_app(token: str) -> FastAPI:
         bus.publish("registry_saved", scope=scope, version=stored["version"], role=role_id)
         return stored
 
+    @app.get("/registry/{scope}/plan", dependencies=guard)
+    async def registry_plan(scope: str) -> dict:
+        """What this browser is used for, in the order it happens."""
+        scope = registry_scope(scope)
+        document = registry_answer(lambda: registry_store.load(scope))
+        answer = flow_contract.plan(scope, document)
+        answer["label"] = registry_model.SCOPE_LABELS[scope]
+        answer["version"] = document["version"]
+        return answer
+
     @app.get("/registry/{scope}/history", dependencies=guard)
     async def registry_history(scope: str) -> dict:
         scope = registry_scope(scope)
@@ -451,6 +462,34 @@ def create_app(token: str) -> FastAPI:
 
     @app.post("/picker/clear", dependencies=guard)
     async def picker_clear() -> dict:
+        return picker.clear()
+
+    @app.post("/picker/picks", dependencies=guard)
+    async def picker_add(body: Dict[str, Any] = Body(...)) -> dict:
+        """An entry added by hand, from wherever it was copied.
+
+        It joins the same numbered list as a selection made in the
+        browser, marked as pasted so the two are never confused.
+        """
+        text = str(body.get("text") or "").strip()
+        if not text:
+            raise HTTPException(status_code=422, detail="Es wurde nichts eingefuegt")
+        scope = str(body.get("scope") or "")
+        picker.add(
+            registry_scope(scope) if scope else "",
+            raw=text,
+            note=str(body.get("note") or ""),
+            url=str(body.get("url") or ""),
+            source=picker_session.BY_HAND,
+        )
+        return picker.state()
+
+    @app.delete("/picker/picks/{serial}", dependencies=guard)
+    async def picker_forget(serial: int) -> dict:
+        return picker.forget(int(serial))
+
+    @app.delete("/picker/picks", dependencies=guard)
+    async def picker_forget_all() -> dict:
         return picker.clear()
 
     @app.post("/picker/{scope}/snapshot", dependencies=guard)

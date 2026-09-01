@@ -1,21 +1,19 @@
 <script>
   import { onMount } from "svelte";
-  import { events } from "../lib/stores/service.js";
   import {
     exportiereRegistrierung,
-    freieKennung,
+    fuegeAuswahlEin,
     importiereRegistrierung,
-    ladeEinstellungen,
+    ladeAblaufplan,
     ladePicker,
     ladeRegistrierung,
     ladeVersionen,
     loescheRolle,
     pruefeRollen,
     setzeZurueck,
-    speichereRolle,
     startePicker,
     stoppePicker,
-    uebernimmGrundkatalog,
+    vergissAuswahl,
     verwirfAuswahl
   } from "../lib/api/service.js";
 
@@ -24,31 +22,22 @@
     { id: "session", label: "Sitzungs-Browser" }
   ];
 
-  let bereich = $state("search");
+  let bereich = $state("session");
+  let plan = $state(null);
   let dokument = $state(null);
   let versionen = $state([]);
-  let picker = $state({ active: false, scope: "", pick: null });
+  let picker = $state({ active: false, scope: "", picks: [], file: "" });
   let pruefung = $state(null);
-  let letzteSerie = $state(0);
   let meldung = $state("");
   let fehler = $state("");
   let beschaeftigt = $state("");
 
-  // Zuordnungspanel
-  let ziel = $state("neu");
-  let neueKennung = $state("");
-  let neuerName = $state("");
-  let menge = $state("einzel");
-  let kennungstraeger = $state("");
-  let antwort = $state("");
-  let antworten = $state([]);
-  let notiz = $state("");
-  let behalten = $state([]);
+  // Eigener Eintrag
+  let eigenerText = $state("");
+  let eigeneNotiz = $state("");
 
-  const auswahl = $derived(picker.pick && picker.pick.scope === bereich ? picker.pick : null);
-  const element = $derived(auswahl?.element ?? null);
-  const rollen = $derived(dokument?.roles ?? []);
-  const letztesEreignis = $derived($events.find((e) => e.kind === "pick") ?? null);
+  const auswahlen = $derived(picker.picks ?? []);
+  const laeuft = $derived(picker.active && picker.scope === bereich);
 
   onMount(() => {
     alles();
@@ -56,22 +45,10 @@
     return () => clearInterval(takt);
   });
 
-  onMount(async () => {
-    try {
-      antworten = (await ladeEinstellungen()).answers ?? [];
-    } catch (e) {
-      antworten = [];
-    }
-  });
-
-  $effect(() => {
-    // Bei einer neuen Auswahl das Panel frisch vorbereiten.
-    if (letztesEreignis) pickerStand();
-  });
-
   async function alles() {
     fehler = "";
     try {
+      plan = await ladeAblaufplan(bereich);
       dokument = await ladeRegistrierung(bereich);
       versionen = (await ladeVersionen(bereich)).versions;
       pruefung = null;
@@ -84,37 +61,9 @@
   async function pickerStand() {
     try {
       picker = await ladePicker();
-      // Nur eine wirklich neue Auswahl bereitet das Panel neu vor. Die
-      // Antwort des Dienstes ist bei jedem Takt ein neues Objekt, ein
-      // Vergleich der Objekte wuerde die Eingaben staendig loeschen.
-      const serie = picker.pick?.serial ?? 0;
-      if (serie && serie !== letzteSerie && picker.pick.scope === bereich) {
-        letzteSerie = serie;
-        await panelVorbereiten();
-      }
     } catch (e) {
       /* der Dienst antwortet gleich wieder */
     }
-  }
-
-  async function panelVorbereiten() {
-    ziel = "neu";
-    menge = "einzel";
-    notiz = "";
-    kennungstraeger = "";
-    antwort = "";
-    neuerName = "";
-    behalten = (picker.pick?.element?.candidates ?? []).map(() => true);
-    try {
-      neueKennung = (await freieKennung(bereich, "rolle")).id;
-    } catch (e) {
-      neueKennung = "rolle";
-    }
-  }
-
-  function beiWechsel(neuerBereich) {
-    bereich = neuerBereich;
-    alles();
   }
 
   async function fuehreAus(name, aufgabe) {
@@ -130,276 +79,303 @@
     }
   }
 
-  const pickerAn = () => fuehreAus("picker", async () => {
-    await startePicker(bereich);
-    await pickerStand();
-  });
+  const pickerAn = () =>
+    fuehreAus("picker", async () => {
+      await startePicker(bereich);
+      await pickerStand();
+      meldung =
+        "Auswahlmodus läuft. Im Browser-Fenster Element anfahren, Enter übernimmt, Esc beendet.";
+    });
 
-  const pickerAus = () => fuehreAus("picker", async () => {
-    await stoppePicker(bereich);
-    await pickerStand();
-  });
+  const pickerAus = () =>
+    fuehreAus("picker", async () => {
+      await stoppePicker(bereich);
+      await pickerStand();
+    });
 
-  const katalog = () => fuehreAus("katalog", async () => {
-    dokument = await uebernimmGrundkatalog(bereich);
-    versionen = (await ladeVersionen(bereich)).versions;
-    meldung = "Grundkatalog ergänzt. Die Rollen sind noch leer und müssen angelernt werden.";
-  });
+  const pruefen = (rolle) =>
+    fuehreAus("pruefen", async () => {
+      pruefung = await pruefeRollen(bereich, rolle);
+    });
 
-  const pruefen = (rolle) => fuehreAus("pruefen", async () => {
-    pruefung = await pruefeRollen(bereich, rolle);
-  });
+  const entfernen = (nummer) =>
+    fuehreAus("entfernen", async () => {
+      picker = await vergissAuswahl(nummer);
+    });
 
-  const exportieren = () => fuehreAus("export", async () => {
-    const ergebnis = await exportiereRegistrierung(bereich);
-    meldung = `Exportiert nach ${ergebnis.path}`;
-  });
+  const alleEntfernen = () =>
+    fuehreAus("entfernen", async () => {
+      picker = await verwirfAuswahl();
+    });
+
+  const eigenenEinfuegen = () =>
+    fuehreAus("einfuegen", async () => {
+      picker = await fuegeAuswahlEin(eigenerText, eigeneNotiz, bereich);
+      eigenerText = "";
+      eigeneNotiz = "";
+      meldung = "Eingefügt. Sag mir, was es ist.";
+    });
+
+  async function kopieren(eintrag) {
+    const inhalt = JSON.stringify(eintrag.element ?? eintrag.raw ?? eintrag, null, 1);
+    try {
+      await navigator.clipboard.writeText(inhalt);
+      meldung = "In die Zwischenablage kopiert.";
+    } catch (e) {
+      fehler = "Kopieren ging nicht. Der Eintrag steht in " + picker.file;
+    }
+  }
+
+  const exportieren = () =>
+    fuehreAus("export", async () => {
+      const ergebnis = await exportiereRegistrierung(bereich);
+      meldung = `Exportiert nach ${ergebnis.path}`;
+    });
 
   async function importieren(ereignis) {
     const datei = ereignis.target.files?.[0];
     if (!datei) return;
     await fuehreAus("import", async () => {
       const text = await datei.text();
-      dokument = await importiereRegistrierung(bereich, JSON.parse(text));
-      versionen = (await ladeVersionen(bereich)).versions;
-      meldung = `Importiert: ${dokument.roles.length} Rollen`;
+      await importiereRegistrierung(bereich, JSON.parse(text));
+      await alles();
+      meldung = "Importiert.";
     });
     ereignis.target.value = "";
   }
 
-  const zurueck = (version) => fuehreAus("zurueck", async () => {
-    dokument = await setzeZurueck(bereich, version);
-    versionen = (await ladeVersionen(bereich)).versions;
-    meldung = `Auf Fassung ${version} zurückgesetzt.`;
-  });
-
-  const entfernen = (id) => fuehreAus("loeschen", async () => {
-    dokument = await loescheRolle(bereich, id);
-    versionen = (await ladeVersionen(bereich)).versions;
-  });
-
-  const verwerfen = () => fuehreAus("verwerfen", async () => {
-    picker = await verwirfAuswahl();
-  });
-
-  function zuordnen() {
-    return fuehreAus("zuordnen", async () => {
-      const merkmale = (element?.candidates ?? []).filter((_, i) => behalten[i]);
-      if (!merkmale.length) throw new Error("Mindestens ein Merkmal muss bleiben");
-      const vorhanden = ziel === "neu" ? null : rollen.find((r) => r.id === ziel);
-      const rolle = {
-        id: ziel === "neu" ? neueKennung.trim() : ziel,
-        label: ziel === "neu" ? neuerName.trim() || neueKennung.trim() : vorhanden.label,
-        menge,
-        notes: notiz || vorhanden?.notes || "",
-        key_attribute: kennungstraeger,
-        // Welches Antwort-Paar dieses Feld fuellt (Spec 8.3).
-        answer: antwort || vorhanden?.answer || "",
-        options: element?.options ?? [],
-        candidates: merkmale
-      };
-      dokument = await speichereRolle(bereich, rolle);
-      versionen = (await ladeVersionen(bereich)).versions;
-      picker = await verwirfAuswahl();
-      meldung = `Rolle ${rolle.id} gespeichert (Fassung ${dokument.version}).`;
+  const zurueck = (version) =>
+    fuehreAus("zurueck", async () => {
+      await setzeZurueck(bereich, version);
+      await alles();
+      meldung = `Auf Fassung ${version} zurückgesetzt.`;
     });
-  }
 
-  function art(merkmal) {
-    return dokument?.kinds?.[merkmal.kind] ?? merkmal.kind;
+  const rolleLoeschen = (id) =>
+    fuehreAus("loeschen", async () => {
+      await loescheRolle(bereich, id);
+      await alles();
+    });
+
+  function beiWechsel(neuerBereich) {
+    bereich = neuerBereich;
+    alles();
   }
 
   function befund(id) {
     return pruefung?.results?.find((r) => r.role === id) ?? null;
   }
+
+  function zustand(schritt) {
+    if (schritt.taught && !schritt.quantity_ok) return { text: "Menge falsch", klasse: "bad" };
+    if (schritt.taught) return { text: "angelernt", klasse: "ok" };
+    if (schritt.required) return { text: "fehlt", klasse: "bad" };
+    return { text: "optional, nicht angelernt", klasse: "muted" };
+  }
+
+  const kurz = (text, laenge = 90) =>
+    !text ? "" : text.length > laenge ? text.slice(0, laenge) + " …" : text;
 </script>
 
-{#if !dokument}
-  <p class="muted">Registrierung wird geladen …</p>
-  {#if fehler}<p class="bad">{fehler}</p>{/if}
-{:else}
-  <div class="seite">
-    <section>
-      <div class="kopf">
-        <div class="knoepfe">
-          {#each bereiche as b}
-            <button class:aktiv={bereich === b.id} onclick={() => beiWechsel(b.id)}>{b.label}</button>
-          {/each}
-        </div>
-        <span class="muted">Fassung {dokument.version} · {rollen.length} Rollen</span>
-      </div>
+<div class="seite">
+  <section>
+    <div class="kopf">
       <div class="knoepfe">
-        {#if picker.active && picker.scope === bereich}
-          <button onclick={pickerAus} disabled={beschaeftigt === "picker"}>Auswahlmodus beenden</button>
-        {:else}
-          <button onclick={pickerAn} disabled={beschaeftigt === "picker"}>Auswahlmodus starten</button>
-        {/if}
-        <button onclick={() => pruefen(null)} disabled={beschaeftigt === "pruefen"}>
-          Alle Rollen auf der offenen Seite prüfen
-        </button>
-        <button onclick={katalog} disabled={beschaeftigt === "katalog"}>Grundkatalog ergänzen</button>
-        <button onclick={exportieren} disabled={beschaeftigt === "export"}>Exportieren</button>
-        <label class="datei">
-          Importieren
-          <input type="file" accept="application/json" onchange={importieren} />
-        </label>
+        {#each bereiche as b}
+          <button class:aktiv={bereich === b.id} onclick={() => beiWechsel(b.id)}>{b.label}</button>
+        {/each}
       </div>
+      {#if plan}<span class="muted">Fassung {plan.version}</span>{/if}
+    </div>
+
+    <div class="knoepfe">
+      {#if laeuft}
+        <button class="stark" onclick={pickerAus} disabled={beschaeftigt === "picker"}>
+          Auswahlmodus beenden
+        </button>
+      {:else}
+        <button class="stark" onclick={pickerAn} disabled={beschaeftigt === "picker"}>
+          Auswahlmodus starten
+        </button>
+      {/if}
+      <button onclick={() => pruefen(null)} disabled={beschaeftigt === "pruefen"}>
+        Alle Rollen auf der offenen Seite prüfen
+      </button>
+    </div>
+
+    <p class="hinweis">
+      Der Auswahlmodus läuft im Browser-Fenster, dort wirkt auch Strg+Umschalt+Y. Element anfahren,
+      Pfeiltasten wechseln die Ebene, Enter übernimmt. Der Modus bleibt an: du kannst mehrere
+      Elemente nacheinander übernehmen. Esc beendet ihn.
+    </p>
+    {#if meldung}<p class="ok">{meldung}</p>{/if}
+    {#if fehler}<p class="bad">{fehler}</p>{/if}
+  </section>
+
+  <section>
+    <div class="kopf">
+      <h2>Ausgewählt ({auswahlen.length})</h2>
+      {#if auswahlen.length}
+        <button onclick={alleEntfernen} disabled={beschaeftigt === "entfernen"}>
+          alle entfernen
+        </button>
+      {/if}
+    </div>
+
+    {#if !auswahlen.length}
       <p class="hinweis">
-        Der Auswahlmodus läuft im eingeblendeten Browser-Fenster. Dort wirkt auch Strg+Umschalt+Y.
-        Element anfahren, mit den Pfeiltasten die Ebene wechseln, Enter übernimmt.
+        Noch nichts ausgewählt. Starte den Auswahlmodus und übernimm im Browser die Elemente, um die
+        es geht. Danach sagst du hier, was welches ist.
       </p>
-      {#if meldung}<p class="ok">{meldung}</p>{/if}
-      {#if fehler}<p class="bad">{fehler}</p>{/if}
-    </section>
-
-    {#if element}
-      <section class="panel">
-        <h2>Auswahl zuordnen</h2>
-        <p class="zeile">
-          <strong>&lt;{element.tag}&gt;</strong>
-          <span class="muted">{element.visible ? "sichtbar" : "nicht sichtbar"}</span>
-        </p>
-        {#if element.text}<p class="hinweis">Text: {element.text}</p>{/if}
-        <p class="pfad">{auswahl.url}</p>
-
-        <div class="reihe">
-          <label>
-            Rolle
-            <select bind:value={ziel}>
-              <option value="neu">(neue Rolle anlegen)</option>
-              {#each rollen as r}
-                <option value={r.id}>{r.label} ({r.id})</option>
-              {/each}
-            </select>
-          </label>
-          {#if ziel === "neu"}
-            <label>
-              Kennung
-              <input bind:value={neueKennung} spellcheck="false" />
-            </label>
-            <label>
-              Anzeigename
-              <input bind:value={neuerName} placeholder="frei wählbar" />
-            </label>
-          {/if}
-          <label>
-            Menge
-            <select bind:value={menge}>
-              <option value="einzel">einzel</option>
-              <option value="liste">liste</option>
-            </select>
-          </label>
-          <label>
-            Kennungsträger
-            <select bind:value={kennungstraeger}>
-              <option value="">(keiner)</option>
-              {#each element.attributes as a}
-                <option value={a.name}>{a.name}</option>
-              {/each}
-            </select>
-          </label>
-          <label>
-            Antwort-Paar (für Formularfelder)
-            <select bind:value={antwort}>
-              <option value="">(keines, Feld bleibt leer)</option>
-              {#each antworten as a}
-                <option value={a.label}>{a.label}</option>
-              {/each}
-            </select>
-          </label>
-        </div>
-
-        <label class="voll">
-          Notiz
-          <input bind:value={notiz} placeholder="frei" />
-        </label>
-
-        <h3>Erkennungsmerkmale, in dieser Reihenfolge geprüft</h3>
-        <ul class="merkmale">
-          {#each element.candidates as m, i}
-            <li>
-              <label>
-                <input type="checkbox" bind:checked={behalten[i]} />
-                <span class="art">{art(m)}</span>
-                <code>{m.kind === "attr" ? `${m.attr} = ${m.value}` : m.value}</code>
-                {#if m.kind === "aria"}<span class="muted">Rolle {m.role}</span>{/if}
-              </label>
-            </li>
-          {/each}
-        </ul>
-
-        {#if element.options.length}
-          <h3>Werte des Auswahlfeldes</h3>
-          <ul class="werte">
-            {#each element.options as o}
-              <li><code>{o.value || "(leer)"}</code> <span class="muted">{o.display}</span></li>
-            {/each}
-          </ul>
-        {/if}
-
-        <div class="knoepfe">
-          <button onclick={zuordnen} disabled={beschaeftigt === "zuordnen"}>Zuordnen und speichern</button>
-          <button onclick={verwerfen}>Auswahl verwerfen</button>
-        </div>
-      </section>
     {/if}
 
-    <section>
-      <h2>Rollen</h2>
-      {#if !rollen.length}
-        <p class="hinweis">
-          Noch nichts angelernt. Die Anwendung kann bewusst nichts tun, solange sie die Seite nicht
-          kennt.
-        </p>
-      {/if}
-      {#each rollen as r (r.id)}
-        <div class="rolle">
-          <div class="zeile">
-            <strong>{r.label}</strong>
-            <code class="muted">{r.id}</code>
-            <span class="muted">{r.menge}</span>
-            <span class="muted">{r.candidates.length} Merkmale</span>
-            {#if r.key_attribute}<span class="muted">Kennung: {r.key_attribute}</span>{/if}
-            {#if r.answer}<span class="muted">Antwort: {r.answer}</span>{/if}
-            {#if befund(r.id)}
-              {#if befund(r.id).ambiguous}
-                <span class="bad">mehrdeutig</span>
-              {:else if befund(r.id).found}
-                <span class:warn={befund(r.id).degraded} class:ok={!befund(r.id).degraded}>
-                  gefunden über {befund(r.id).kind_label}{befund(r.id).degraded ? " (Degradierung)" : ""}
-                </span>
-              {:else}
-                <span class="muted">nicht gefunden</span>
-              {/if}
-            {/if}
-            <span class="fueller"></span>
-            <button onclick={() => pruefen(r.id)}>prüfen</button>
-            <button onclick={() => entfernen(r.id)}>löschen</button>
-          </div>
-          {#if r.notes}<p class="hinweis">{r.notes}</p>{/if}
+    {#each auswahlen as eintrag, i (eintrag.serial)}
+      <div class="karte">
+        <div class="zeile">
+          <span class="nummer">{i + 1}</span>
+          {#if eintrag.element}
+            <strong>&lt;{eintrag.element.tag}&gt;</strong>
+            <span class="muted">{eintrag.element.visible ? "sichtbar" : "nicht sichtbar"}</span>
+            <span class="muted">{eintrag.element.candidates?.length ?? 0} Merkmale</span>
+          {:else}
+            <strong>von Hand eingefügt</strong>
+          {/if}
+          <span class="muted">{bereiche.find((b) => b.id === eintrag.scope)?.label ?? ""}</span>
+          <span class="muted">{eintrag.at?.slice(11, 19)}</span>
+          <span class="fueller"></span>
+          <button onclick={() => kopieren(eintrag)}>kopieren</button>
+          <button onclick={() => entfernen(eintrag.serial)}>entfernen</button>
         </div>
+        {#if eintrag.note}<p class="notiz">{eintrag.note}</p>{/if}
+        {#if eintrag.element?.text}<p class="hinweis">Text: {kurz(eintrag.element.text)}</p>{/if}
+        {#if eintrag.raw}<p class="pfad">{kurz(eintrag.raw, 200)}</p>{/if}
+        {#if eintrag.url}<p class="pfad">{eintrag.url}</p>{/if}
+      </div>
+    {/each}
+
+    <details>
+      <summary>Eigenen Eintrag einfügen</summary>
+      <p class="hinweis">
+        Für Elemente aus einem anderen Browser: dort im Entwicklerwerkzeug „Element kopieren" wählen
+        und hier einfügen.
+      </p>
+      <textarea rows="4" bind:value={eigenerText} placeholder="HTML einfügen"></textarea>
+      <input bind:value={eigeneNotiz} placeholder="Notiz, zum Beispiel: das ist der Anmelden-Knopf" />
+      <button
+        onclick={eigenenEinfuegen}
+        disabled={!eigenerText.trim() || beschaeftigt === "einfuegen"}
+      >
+        Einfügen
+      </button>
+    </details>
+  </section>
+
+  {#if plan}
+    <section>
+      <h2>Ablauf und Rollen</h2>
+      {#if plan.open.length}
+        <p class="bad">Es fehlt noch: {plan.open.join(", ")}</p>
+      {:else}
+        <p class="ok">Alle Pflichtrollen dieses Browsers sind angelernt.</p>
+      {/if}
+
+      {#each plan.groups as gruppe}
+        <h3>{gruppe.group}</h3>
+        {#each gruppe.steps as schritt}
+          <div class="schritt">
+            <div class="zeile">
+              <span class="nummer">{schritt.position}</span>
+              <strong>{schritt.meaning}</strong>
+              <code class="muted">{schritt.role}{schritt.family ? "…" : ""}</code>
+              <span class={zustand(schritt).klasse}>{zustand(schritt).text}</span>
+              {#if schritt.taught && !schritt.family}
+                <span class="muted">{schritt.candidates} Merkmale</span>
+              {/if}
+              {#if !schritt.quantity_ok}
+                <span class="bad">
+                  Menge ist „{schritt.quantity_is}", nötig ist „{schritt.quantity}"
+                </span>
+              {/if}
+              {#if befund(schritt.role)}
+                {#if befund(schritt.role).ambiguous}
+                  <span class="bad">mehrdeutig</span>
+                {:else if befund(schritt.role).found}
+                  <span
+                    class:warn={befund(schritt.role).degraded}
+                    class:ok={!befund(schritt.role).degraded}
+                  >
+                    gefunden{befund(schritt.role).degraded ? " (Degradierung)" : ""}
+                  </span>
+                {:else}
+                  <span class="muted">nicht gefunden</span>
+                {/if}
+              {/if}
+            </div>
+            <p class="hinweis">{schritt.description}</p>
+            {#each schritt.members as m}
+              <p class="mitglied">
+                <code>{m.role}</code> {m.label}
+                {#if m.answer}<span class="muted">Antwort-Paar: {m.answer}</span>{/if}
+                <span class="muted">{m.candidates} Merkmale</span>
+              </p>
+            {/each}
+          </div>
+        {/each}
       {/each}
+
+      {#if plan.extra.length}
+        <h3>Nicht Teil eines Ablaufs</h3>
+        <p class="hinweis">Diese Rollen fragt die Anwendung nirgends ab. Sie können weg.</p>
+        {#each plan.extra as r}
+          <div class="zeile">
+            <code>{r.role}</code>
+            <span class="muted">{r.label}</span>
+            <span class="muted">{r.candidates} Merkmale</span>
+            <span class="fueller"></span>
+            <button onclick={() => rolleLoeschen(r.role)}>löschen</button>
+          </div>
+        {/each}
+      {/if}
       {#if pruefung}<p class="pfad">geprüft auf {pruefung.url}</p>{/if}
     </section>
+  {/if}
 
-    <section>
-      <h2>Fassungen</h2>
-      {#if !versionen.length}
-        <p class="hinweis">Noch keine frühere Fassung.</p>
-      {/if}
-      {#each versionen as v}
+  <details class="werkzeuge">
+    <summary>Sicherung und Fassungen</summary>
+    <div class="knoepfe">
+      <button onclick={exportieren} disabled={beschaeftigt === "export"}>Exportieren</button>
+      <label class="datei">
+        Importieren
+        <input type="file" accept="application/json" onchange={importieren} />
+      </label>
+    </div>
+    {#if !versionen.length}<p class="hinweis">Noch keine frühere Fassung.</p>{/if}
+    {#each versionen as v}
+      <div class="zeile">
+        <strong>{v.version}</strong>
+        <span class="muted">{v.updated}</span>
+        <span class="muted">{v.roles} Rollen</span>
+        <span class="muted">{v.note}</span>
+        <span class="fueller"></span>
+        <button onclick={() => zurueck(v.version)}>zurücksetzen</button>
+      </div>
+    {/each}
+    {#if dokument?.roles?.length}
+      <h3>Alle Rollen</h3>
+      {#each dokument.roles as r (r.id)}
         <div class="zeile">
-          <strong>{v.version}</strong>
-          <span class="muted">{v.updated}</span>
-          <span class="muted">{v.roles} Rollen</span>
-          <span class="muted">{v.note}</span>
+          <code>{r.id}</code>
+          <span class="muted">{r.label}</span>
+          <span class="muted">{r.menge}</span>
+          <span class="muted">{r.candidates.length} Merkmale</span>
           <span class="fueller"></span>
-          <button onclick={() => zurueck(v.version)}>zurücksetzen</button>
+          <button onclick={() => pruefen(r.id)}>prüfen</button>
+          <button onclick={() => rolleLoeschen(r.id)}>löschen</button>
         </div>
       {/each}
-    </section>
-  </div>
-{/if}
+    {/if}
+  </details>
+</div>
 
 <style>
   .seite { display: flex; flex-direction: column; gap: 24px; padding-bottom: 40px; }
@@ -407,26 +383,34 @@
   h2 {
     font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em;
     color: var(--muted); margin: 0; padding-bottom: 6px; border-bottom: 1px solid var(--line);
+    flex: 1;
   }
-  h3 { font-size: 12px; color: var(--muted); margin: 6px 0 0; }
+  h3 { font-size: 13px; margin: 10px 0 0; }
   .kopf { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
   .knoepfe { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
   .knoepfe button.aktiv { background: var(--panel); border-color: var(--line); color: var(--text); }
-  .panel { border: 1px solid var(--line); border-radius: 8px; padding: 12px; background: var(--panel); }
-  .reihe { display: flex; gap: 10px; flex-wrap: wrap; }
-  .reihe label, .voll { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); }
-  .voll input { width: 100%; }
+  button.stark { border-color: var(--ok); color: var(--text); }
+  .karte, .schritt {
+    border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; background: var(--panel);
+  }
   .zeile { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin: 0; font-size: 13px; }
+  .nummer {
+    display: inline-flex; align-items: center; justify-content: center;
+    min-width: 20px; height: 20px; border-radius: 10px; background: var(--line);
+    font-size: 11px; color: var(--text);
+  }
   .fueller { flex: 1; }
-  .rolle { border-bottom: 1px solid var(--line); padding: 6px 0; }
-  .merkmale, .werte { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
-  .merkmale label { display: flex; gap: 8px; align-items: center; font-size: 12px; }
-  .art { color: var(--muted); min-width: 120px; }
+  .mitglied { font-size: 12px; margin: 4px 0 0 30px; display: flex; gap: 8px; flex-wrap: wrap; }
+  .notiz { font-size: 13px; margin: 4px 0 0; }
   code { font-size: 12px; word-break: break-all; }
   .datei { font-size: 13px; cursor: pointer; border: 1px solid var(--line); border-radius: 6px; padding: 6px 10px; }
   .datei input { display: none; }
-  .hinweis { font-size: 12px; color: var(--muted); margin: 0; }
-  .pfad { font-size: 11px; color: var(--muted); word-break: break-all; margin: 0; }
+  textarea, details input { width: 100%; margin: 6px 0; }
+  details { border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; }
+  summary { font-size: 13px; cursor: pointer; color: var(--muted); }
+  .werkzeuge { display: flex; flex-direction: column; gap: 8px; }
+  .hinweis { font-size: 12px; color: var(--muted); margin: 4px 0 0; }
+  .pfad { font-size: 11px; color: var(--muted); word-break: break-all; margin: 2px 0 0; }
   .muted { color: var(--muted); }
   .ok { color: var(--ok); font-size: 13px; margin: 0; }
   .warn { color: var(--warn); }

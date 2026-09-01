@@ -21,6 +21,8 @@
   const HIT = "data-zt-hit";
   const MAX_TEXT = 80;
   const MAX_PATH_DEPTH = 4;
+  // How much of the element itself travels along as context.
+  const MAX_OUTER = 1200;
 
   // ------------------------------------------------------------ utilities
 
@@ -192,6 +194,15 @@
     }));
   }
 
+  /** The element itself as written, shortened. Context, not a candidate. */
+  function outerOf(element) {
+    try {
+      return (element.outerHTML || "").slice(0, MAX_OUTER);
+    } catch (error) {
+      return "";
+    }
+  }
+
   function describe(element) {
     return {
       tag: element.tagName.toLowerCase(),
@@ -201,6 +212,7 @@
       options: optionsOf(element),
       candidates: candidates(element),
       path: shortPath(element),
+      outer: outerOf(element),
       url: location.href
     };
   }
@@ -300,6 +312,7 @@
   let bar = null;
   let current = null;
   let active = false;
+  let taken = 0;
 
   function build() {
     if (box && box.isConnected) return;
@@ -319,7 +332,42 @@
   }
 
   const HINT =
-    "Pfeil hoch/runter: Ebene wechseln, Pfeil links/rechts: Nachbar, Enter: übernehmen, Esc: abbrechen";
+    "Pfeil hoch/runter: Ebene wechseln, Pfeil links/rechts: Nachbar, " +
+    "Enter: übernehmen, Esc: beenden";
+
+  /**
+   * The description into the clipboard, so it can be handed over by
+   * pasting it somewhere. Two ways, because the first one is refused in
+   * some situations, and a refused copy must never cost the selection.
+   */
+  function copy(payload) {
+    const line = JSON.stringify(payload, null, 1);
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(line).catch(() => fallback(line));
+        return true;
+      }
+    } catch (error) {
+      /* fall through */
+    }
+    return fallback(line);
+  }
+
+  function fallback(line) {
+    try {
+      const field = document.createElement("textarea");
+      field.setAttribute(MARK, "1");
+      field.style.cssText = "position:fixed;left:-9999px;top:0;opacity:0";
+      field.value = line;
+      document.documentElement.appendChild(field);
+      field.select();
+      const done = document.execCommand("copy");
+      field.remove();
+      return done;
+    } catch (error) {
+      return false;
+    }
+  }
 
   function paint() {
     if (!current) {
@@ -334,6 +382,7 @@
     box.style.height = `${rect.height}px`;
     const label = text(current).slice(0, 40);
     bar.textContent =
+      (taken ? `${taken} übernommen   ` : "") +
       `Auswahl: <${current.tagName.toLowerCase()}>` + (label ? ` "${label}"` : "") + "   " + HINT;
   }
 
@@ -375,8 +424,17 @@
       return;
     }
     if (event.key === "Enter") {
-      if (current) report({ type: "pick", element: describe(current) });
-      stop();
+      if (current) {
+        const element = describe(current);
+        report({ type: "pick", element });
+        taken += 1;
+        // The mode stays on. Several elements in a row are the normal
+        // case: they are handed over together afterwards.
+        const copied = copy(element);
+        bar.textContent =
+          `${taken} übernommen${copied ? " und kopiert" : " (Kopieren ging nicht)"}` +
+          "   Weiter anfahren, Esc beendet.";
+      }
       return;
     }
     if (!current) return;
@@ -407,6 +465,7 @@
     build();
     arm();
     active = true;
+    taken = 0;
     current = null;
     box.style.display = "none";
     bar.style.display = "block";

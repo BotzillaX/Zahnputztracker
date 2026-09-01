@@ -91,6 +91,7 @@ export const speichereRolle = (bereich, rolle) =>
 export const loescheRolle = (bereich, id) =>
   request(`/registry/${bereich}/roles/${id}`, { method: "DELETE" });
 export const ladeVersionen = (bereich) => request(`/registry/${bereich}/history`);
+export const ladeAblaufplan = (bereich) => request(`/registry/${bereich}/plan`);
 export const setzeZurueck = (bereich, version) =>
   request(`/registry/${bereich}/restore`, { method: "POST", body: { version } });
 export const exportiereRegistrierung = (bereich) =>
@@ -105,7 +106,11 @@ export const pruefeRollen = (bereich, rolle) =>
 export const ladePicker = () => request("/picker");
 export const startePicker = (bereich) => request(`/picker/${bereich}/start`, { method: "POST" });
 export const stoppePicker = (bereich) => request(`/picker/${bereich}/stop`, { method: "POST" });
-export const verwirfAuswahl = () => request("/picker/clear", { method: "POST" });
+export const verwirfAuswahl = () => request("/picker/picks", { method: "DELETE" });
+export const vergissAuswahl = (nummer) =>
+  request(`/picker/picks/${nummer}`, { method: "DELETE" });
+export const fuegeAuswahlEin = (text, notiz, bereich) =>
+  request("/picker/picks", { method: "POST", body: { text, note: notiz ?? "", scope: bereich } });
 export const oeffneKopie = (bereich, ansicht, herkunft) =>
   request(`/picker/${bereich}/snapshot`, {
     method: "POST",

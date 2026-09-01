@@ -22,6 +22,8 @@ os.environ["LOCALAPPDATA"] = _temp + "-lokal"
 from ..api.events import bus  # noqa: E402
 from ..atlas import catalog  # noqa: E402
 from ..picker import snapshot as snapshot_view  # noqa: E402
+from ..flow import contract  # noqa: E402
+from ..picker import session as picker_session  # noqa: E402
 from ..picker.session import picker  # noqa: E402
 from ..registry import model, resolve  # noqa: E402
 from ..runtime import browser_install, instances  # noqa: E402
@@ -190,7 +192,7 @@ async def main():
         await asyncio.sleep(0.2)
         await seite.keyboard.press("Enter")
         await asyncio.sleep(0.5)
-        gewaehlt = picker.pick
+        gewaehlt = picker.picks[-1] if picker.picks else None
         check(gewaehlt is not None, "die Auswahl kam beim Dienst an")
         if gewaehlt:
             check(gewaehlt["element"]["tag"] == "div",
@@ -198,12 +200,80 @@ async def main():
             check(any(k["kind"] == "attr" and k["attr"] == "data-item"
                       for k in gewaehlt["element"]["candidates"]),
                   "zur Auswahl wurden Merkmale erzeugt")
-        check(not picker.active, "Enter beendet den Auswahlmodus")
+            check(gewaehlt["element"].get("outer", "").startswith("<div"),
+                  "der Ausschnitt der Seite kommt mit")
+        check(picker.active, "nach Enter bleibt der Auswahlmodus an")
 
-        await picker.start(seite, "search")
+        # Ein zweites Element, damit die Reihenfolge geprueft werden kann.
+        zweiter = await seite.locator("[data-testid=auswahl]").bounding_box()
+        await seite.mouse.move(zweiter["x"] + 5, zweiter["y"] + 5)
+        await asyncio.sleep(0.3)
+        await seite.keyboard.press("Enter")
+        await asyncio.sleep(0.5)
+        check(len(picker.picks) == 2, f"zwei Auswahlen liegen vor ({len(picker.picks)})")
+        check(picker.picks[0]["element"]["tag"] == "div"
+              and picker.picks[1]["element"]["tag"] == "select",
+              "die Reihenfolge der Auswahl bleibt erhalten")
+
         await seite.keyboard.press("Escape")
         await asyncio.sleep(0.3)
-        check(not picker.active, "Esc bricht ab")
+        check(not picker.active, "Esc beendet den Auswahlmodus")
+
+        # ---------------------------------------- Liste, Datei, eigener Eintrag
+        picker.add("session", raw="<b>von Hand</b>", note="Notiz",
+                   source=picker_session.BY_HAND)
+        check(picker.picks[-1]["source"] == picker_session.BY_HAND
+              and picker.picks[-1]["note"] == "Notiz",
+              "ein eigener Eintrag steht in derselben Liste")
+        check(picker.picks[-1]["element"] is None,
+              "und wird nicht mit einer echten Auswahl verwechselt")
+
+        erste_nummer = picker.picks[0]["serial"]
+        uebrig = [e["serial"] for e in picker.picks[1:]]
+        picker.forget(erste_nummer)
+        check([e["serial"] for e in picker.picks] == uebrig,
+              "entfernen trifft genau einen Eintrag, die uebrigen bleiben in Reihenfolge")
+
+        zweiter_dienst = picker_session.Picker()
+        check([e["serial"] for e in zweiter_dienst.picks] == uebrig,
+              "die Auswahl ueberlebt einen Neustart des Dienstes")
+
+        for nummer in range(picker_session.MAX_PICKS + 5):
+            picker.add("search", raw=f"fuellung {nummer}", source=picker_session.BY_HAND)
+        check(len(picker.picks) == picker_session.MAX_PICKS,
+              f"die Obergrenze greift ({len(picker.picks)})")
+        check(picker.picks[-1]["raw"].endswith(str(picker_session.MAX_PICKS + 4)),
+              "die juengste Auswahl bleibt, die aeltesten fallen weg")
+        picker.clear()
+        check(not picker.picks, "alles entfernen leert die Liste")
+
+        # --------------------------------------------------- Ablauf und Rollen
+        leer = model.empty_document("search")
+        plan = contract.plan("search", leer)
+        check([g["group"] for g in plan["groups"]] == ["Suchlauf"],
+              "der Such-Browser hat genau eine Gruppe")
+        check(plan["open"] == [contract.LABELS[contract.ITEM_LINK]],
+              "ohne Anlernen fehlt die Pflichtrolle")
+        leer["roles"].append(rolle(contract.ITEM_LINK,
+                                   [{"kind": "attr", "attr": "data-item", "value": "1"}]))
+        plan = contract.plan("search", leer)
+        schritt = plan["groups"][0]["steps"][0]
+        check(schritt["taught"] and not schritt["quantity_ok"],
+              "die Menge 'einzel' wird als falsch gemeldet")
+        check(plan["open"], "und die Rolle gilt damit als offen")
+        leer["roles"][0]["menge"] = "liste"
+        plan = contract.plan("search", leer)
+        check(not plan["open"], "mit der Menge 'liste' ist nichts mehr offen")
+        leer["roles"].append(rolle("etwas_eigenes", [{"kind": "id", "value": "x"}]))
+        plan = contract.plan("search", leer)
+        check([r["role"] for r in plan["extra"]] == ["etwas_eigenes"],
+              "eine Rolle ausserhalb des Ablaufs wird als solche benannt")
+
+        sitzung = contract.plan("session", model.empty_document("session"))
+        check([g["group"] for g in sitzung["groups"]] == ["Anmeldung", "Ein Eintrag"],
+              "der Sitzungs-Browser hat zwei Gruppen in dieser Reihenfolge")
+        check(all(s["description"] for g in sitzung["groups"] for s in g["steps"]),
+              "jeder Schritt hat eine Beschreibung")
 
         # ------------------------------------------------- Seiten-Katalog
         erste = await catalog.capture(seite, "search", trigger="Pruefung")
