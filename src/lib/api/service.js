@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { pushEvent, serviceStatus } from "../stores/service.js";
+import { signalton } from "../ton.js";
 import { endpoint, request } from "./client.js";
 
 let socket = null;
@@ -21,6 +22,7 @@ async function connectStream() {
     if (event.kind === "heartbeat") return;
     if (typeof event.seq === "number") lastSeq = event.seq;
     pushEvent(event);
+    signalton(event);
   };
   socket.onclose = () => {
     socket = null;
@@ -123,6 +125,8 @@ export const ladeAnsichten = (bereich) =>
 export const merkeAnsicht = (bereich) => request(`/atlas/${bereich}/capture`, { method: "POST" });
 export const vergissAnsicht = (bereich, ansicht) =>
   request(`/atlas/${bereich}/${ansicht}`, { method: "DELETE" });
+export const ladeKarte = (bereich) =>
+  request(`/atlas/map${bereich ? `?scope=${encodeURIComponent(bereich)}` : ""}`);
 
 export const ladeZustaende = (bereich) => request(`/states/${bereich}`);
 export const speichereZustand = (bereich, zustand) =>
@@ -171,6 +175,11 @@ export const entscheideEintrag = (kennung, entscheidung) =>
 export const ladeVorfaelle = () => request("/incidents");
 export const ladeVorfall = (kennung) => request(`/incidents/${kennung}`);
 export const vergissVorfall = (kennung) => request(`/incidents/${kennung}`, { method: "DELETE" });
+export const oeffneVorfallImPicker = (kennung, bereich, datei) =>
+  request(`/incidents/${kennung}/picker`, {
+    method: "POST",
+    body: { scope: bereich, name: datei ?? "seite.html" }
+  });
 
 export const ladeDiagnose = () => request("/diagnose");
 export const ladeLaufzeiten = () => request("/diagnose/stats");

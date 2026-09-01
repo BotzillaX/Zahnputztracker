@@ -1,3 +1,4 @@
+mod notices;
 mod secrets;
 mod supervisor;
 mod tray;
@@ -34,12 +35,14 @@ fn browser_window_count(pids: Vec<u32>) -> usize {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_notification::init())
         .setup(|app| {
             let supervisor = Arc::new(Supervisor::new());
             app.manage(supervisor.clone());
             supervisor::launch(app.handle().clone());
             tray::install(app.handle())?;
             tray::watch(app.handle().clone(), supervisor.clone());
+            notices::watch(app.handle().clone(), supervisor.clone());
             windows::enforce(supervisor);
             Ok(())
         })

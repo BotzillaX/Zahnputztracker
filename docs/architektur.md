@@ -522,3 +522,71 @@ Optional (Vorbelegung aus, eigener Vorgang `search.idle_behavior`).
 Während der Wartezeit im Such-Browser kleine, zufällige Scrollbewegungen,
 nie ein Klick: ein Klick könnte etwas öffnen, und dieser Browser soll nur
 eine Liste lesen.
+
+## Karte, Korrektur und Meldungen (Phase 8)
+
+### Die Karte der Ansichten
+
+Der Ansichten-Katalog sammelt seit Phase 3 jede Ansicht, die wirklich
+gesehen wurde: Struktur-Signatur, Kopie, Bild, Adresse, Zeitpunkt. Dazu
+kommt jetzt der **Schritt von einer Ansicht zur nächsten**.
+
+Jede Erfassung merkt sich, auf welcher Ansicht die Instanz zuletzt stand.
+Ist die neue Ansicht eine andere, entsteht (oder zählt hoch) eine Kante
+`von > nach > Auslöser` in `%APPDATA%\Zahnputztracker\atlas\<browser>\edges.json`,
+mit erstem und letztem Auftreten und Anzahl. Auslöser ist das, was den
+Wechsel ausgelöst hat ("Navigation", "Neu laden", "Adresszeile", "Von
+Hand"), also genau die Angabe, die schon die Ankunft beschriftet.
+
+Drei Regeln, damit die Karte nichts behauptet:
+
+- Nach einem Neustart hat die erste Ansicht eines Laufs keinen Vorgänger.
+  Es wird keiner erfunden.
+- Wird eine Ansicht wegen der Obergrenze nicht gespeichert, entsteht auch
+  keine Kante zu ihr. Eine Linie, deren Ende es nicht gibt, erklärt nichts.
+- Wird eine Ansicht vergessen, verschwinden alle Kanten, die sie berühren.
+
+Die Karte selbst (Reiter **Karte**) ordnet die Ansichten spaltenweise: eine
+Ansicht steht so weit rechts, wie sie Schritte von einem Anfang entfernt
+ist. Anfang ist jede Ansicht, in die kein beobachteter Schritt führt.
+Ansichten, die in gar keinem Schritt vorkommen, stehen in einer eigenen
+Spalte ganz links ("ohne bekannten Weg"): gesehen, aber es ist nicht
+aufgezeichnet, wie man hinkommt. Ein Klick auf einen Kasten zeigt Bild,
+Adresse, Zeitpunkte, alle Wege hin und alle Wege weiter, und öffnet auf
+Wunsch die gespeicherte Kopie im Auswahlmodus.
+
+### Vom Vorfall direkt in die Korrektur
+
+Jede Zustandserfassung eines Vorfalls enthält eine Kopie der Seite
+(`seite.html`, spätere Erfassungen in `stufeN-...\seite.html`). In der
+Diagnose öffnet ein Knopf genau diese Kopie im Such-Browser, ohne Skript
+und ohne Netz. Der Auswahlmodus arbeitet dort wie auf der echten Seite,
+also lässt sich eine Rolle korrigieren, ohne die Lage von damals wieder
+herzustellen.
+
+Welche Datei geöffnet wird, prüft der Dienst gegen den Ordner des
+Vorfalls. Ein Pfad aus dem Ordner heraus wird abgelehnt.
+
+### Benachrichtigungen und Ton
+
+`telemetry/notify.py` ist weiterhin die einzige Stelle, die entscheidet,
+was eine Meldung ist. Neu ist ein zweiter Empfänger: eine kurze
+Warteschlange der letzten 50 Meldungen mit laufender Nummer. Der Kern
+(Rust) fragt alle zwei Sekunden nach allem hinter der Nummer, die er
+zuletzt gesehen hat, und macht daraus eine Windows-Systemmeldung. Damit
+gilt:
+
+- keine Meldung doppelt, keine verloren, solange die Warteschlange reicht
+- was vor dem Start der Oberfläche geschah, wird nicht nachträglich
+  angezeigt (beim ersten Abholen wird nur der Stand übernommen)
+- startet der Dienst neu und zählt wieder von vorn, folgt der Kern der
+  kleineren Nummer, statt für immer zu schweigen
+- die Einstellung "Benachrichtigungen" steuert nur die Systemmeldung. Im
+  Ereignisstrom und in der Oberfläche steht die Meldung immer.
+
+Der Signalton bei einem neu gefundenen Eintrag liegt als Klangdatei bei
+(`src/assets/hinweis.wav`, zwei kurze Töne, im Programm erzeugt, aus
+keiner fremden Quelle). Ob er klingt, entscheidet der Dienst anhand der
+Einstellung und hängt es an die Meldung; die Oberfläche spielt nur ab.
+Geht das Abspielen nicht (stummer Rechner, gesperrte Wiedergabe), wird
+der Fehler geschluckt: die Meldung steht ohnehin sichtbar da.

@@ -364,6 +364,22 @@ async def schwellen_pruefen(instanz):
     check(len(strom.art("span_blocked")) == 1, "die Blockade steht im Protokoll")
     meldungen = [e for e in strom.art("notification") if e.get("topic") == notify.BLOCKED]
     check(len(meldungen) >= 1, "und wird als Benachrichtigung gemeldet")
+
+    # Der Kern holt sich die Meldungen ueber eine kurze Warteschlange und
+    # fragt jeweils nach allem hinter der Nummer, die er zuletzt gesehen
+    # hat. Zweimal dieselbe Meldung waere eine zweite Systemmeldung.
+    warteschlange = notify.pending(0)
+    check(any(m.get("topic") == notify.BLOCKED for m in warteschlange["messages"]),
+          "die Blockade steht auch in der Warteschlange fuer den Kern")
+    check(all(m.get("number") for m in warteschlange["messages"]),
+          "jede Meldung traegt eine laufende Nummer")
+    check(notify.pending(warteschlange["number"])["messages"] == [],
+          "nach dem Abholen ist nichts Neues mehr offen")
+    notify.notify(notify.CODE, "Pruefung")
+    nachgereicht = notify.pending(warteschlange["number"])["messages"]
+    check(len(nachgereicht) == 1 and nachgereicht[0]["topic"] == notify.CODE,
+          "eine spaetere Meldung wird genau einmal nachgereicht")
+
     check(len(strom.art("recovery_started")) == 1,
           "danach laeuft die Wiederherstellung an")
     stufen = strom.art("recovery_stage")

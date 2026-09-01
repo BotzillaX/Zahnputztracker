@@ -9,6 +9,7 @@
     ladeLaufzeiten,
     ladeVorfaelle,
     ladeVorfall,
+    oeffneVorfallImPicker,
     raeumeAuf,
     vergissVorfall
   } from "../lib/api/service.js";
@@ -96,7 +97,16 @@
         `${antwort.traces.length} Aufzeichnungen, ${antwort.logs.length} Protokolltage.`;
     });
 
-  const statusfarbe = (stufe) =>
+  const korrigiere = (stufe) =>
+    fuehreAus("korrigieren", async () => {
+      const datei = (stufe.folder ? `${stufe.folder}/` : "") + "seite.html";
+      const ergebnis = await oeffneVorfallImPicker(offen.incident, "search", datei);
+      meldung =
+        "Die gespeicherte Seite ist im Such-Browser geöffnet (ohne Skript, ohne Netz). " +
+        "Dort den Auswahlmodus starten und die Rolle neu zeigen. " + ergebnis.file;
+    });
+
+  const statusfarbe = (stufe) =
     stufe === "blockiert" ? "var(--bad)" : stufe === "auffaellig" ? "var(--warn)" : "var(--ok)";
 
   const stufenfarbe = (stufe) =>
@@ -293,6 +303,11 @@
           <p class="warnung">
             nicht gefunden: {(stufe.roles?.missing ?? []).map((r) => r.label).join(", ") || "keine"}
           </p>
+          <div class="knoepfe">
+            <button onclick={() => korrigiere(stufe)} disabled={beschaeftigt === "korrigieren"}>
+              Im Picker öffnen und korrigieren
+            </button>
+          </div>
         </div>
       {/each}
       {#if bild}<img src={bild} alt="Bildschirmfoto des Vorfalls" />{/if}

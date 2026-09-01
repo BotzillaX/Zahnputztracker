@@ -8,6 +8,7 @@
   import Registrierung from "./routes/Registrierung.svelte";
   import Zustaende from "./routes/Zustaende.svelte";
   import Ansichten from "./routes/Ansichten.svelte";
+  import Karte from "./routes/Karte.svelte";
   import Diagnose from "./routes/Diagnose.svelte";
   import Einstellungen from "./routes/Einstellungen.svelte";
 
@@ -17,6 +18,7 @@
     { id: "registrierung", label: "Registrierung", ansicht: Registrierung },
     { id: "zustaende", label: "Zustände", ansicht: Zustaende },
     { id: "ansichten", label: "Ansichten", ansicht: Ansichten },
+    { id: "karte", label: "Karte", ansicht: Karte },
     { id: "diagnose", label: "Diagnose", ansicht: Diagnose },
     { id: "einstellungen", label: "Einstellungen", ansicht: Einstellungen }
   ];

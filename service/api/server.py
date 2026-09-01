@@ -50,6 +50,7 @@ from ..telemetry import (
     housekeeping,
     incidents,
     journal,
+    notify,
     report as diagnosis_report,
     spans,
     stats,
@@ -792,6 +793,27 @@ def create_app(token: str) -> FastAPI:
         except (FileNotFoundError, ValueError) as error:
             raise HTTPException(status_code=404, detail=str(error)) from error
 
+    @app.post("/incidents/{incident}/picker", dependencies=guard)
+    async def incident_picker(incident: str, body: Dict[str, Any] = Body(default={})) -> dict:
+        """Open the page copy of an incident, ready to be corrected.
+
+        The way from a bad situation to its repair without reproducing
+        it (spec 12.4). The name of the file is checked against the
+        incident's own folder, so nothing else can be opened this way.
+        """
+        scope = registry_scope(str(body.get("scope") or "search"))
+        name = str(body.get("name") or "seite.html")
+        instance = live_page(scope)
+        try:
+            file = incidents.file_of(incident, name)
+            opened = await snapshot_view.open_on(instance.page, file)
+        except (FileNotFoundError, ValueError) as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        except Exception as error:  # noqa: BLE001
+            raise HTTPException(status_code=502, detail=str(error)) from error
+        bus.publish("snapshot_opened", scope=scope, incident=incident, file=name)
+        return {**opened, "incident": incident, "scope": scope, "name": name}
+
     @app.delete("/incidents/{incident}", dependencies=guard)
     async def incident_forget(incident: str) -> dict:
         try:
@@ -906,6 +928,13 @@ def create_app(token: str) -> FastAPI:
                 "limit_s": spans.hard_limit(name),
                 "soft_ms": stats.soft_threshold(name, scope)}
 
+    # --------------------------------------------------------- notifications
+
+    @app.get("/notifications", dependencies=guard)
+    async def notification_queue(after: int = Query(default=0, ge=0)) -> dict:
+        """What the host process has not turned into a system message yet."""
+        return notify.pending(after)
+
     # ----------------------------------------------------------- page catalogue
 
     @app.get("/atlas", dependencies=guard)
@@ -913,6 +942,13 @@ def create_app(token: str) -> FastAPI:
         if scope:
             scope = registry_scope(scope)
         return {"views": atlas.views(scope)}
+
+    @app.get("/atlas/map", dependencies=guard)
+    async def atlas_map(scope: Optional[str] = Query(default=None)) -> dict:
+        """Views and the steps between them, for the map."""
+        if scope:
+            scope = registry_scope(scope)
+        return atlas.graph(scope)
 
     @app.post("/atlas/{scope}/capture", dependencies=guard)
     async def atlas_capture(scope: str) -> dict:

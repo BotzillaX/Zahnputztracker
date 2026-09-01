@@ -294,6 +294,42 @@ async def main():
               "zur Ansicht wurde ein Bild gesichert")
         check(str(catalog.root()).startswith(_temp), "der Katalog liegt ausserhalb des Programms")
 
+        # ------------------------------------------------- Karte der Ansichten
+        # Die Instanz erfasst jede Navigation von selbst. Fuer diese Pruefung
+        # wird das abgeschaltet, damit nur die hier ausgeloesten Schritte in
+        # der Karte stehen und der Ausloeser eindeutig ist.
+        instanz.catalogue = False
+        for datei in (catalog.root() / "search").glob("edges.json"):
+            datei.unlink()
+        catalog._last.pop("search", None)
+        await seite.set_content(SEITE)
+        await catalog.capture(seite, "search", trigger="Pruefung")
+        await seite.set_content(ZWEITE_SEITE)
+        await catalog.capture(seite, "search", trigger="Pruefung")
+        karte = catalog.graph("search")
+        schritte = karte["steps"]
+        check(len(karte["views"]) == 2, "die Karte kennt beide Ansichten")
+        check(len(schritte) == 1, "genau ein Uebergang wurde beobachtet")
+        check(schritte[0]["from"] == erste["view"] and schritte[0]["to"] == andere["view"],
+              "der Uebergang zeigt in die Richtung, in die gegangen wurde")
+        check(schritte[0]["trigger"] == "Pruefung", "der Ausloeser des Uebergangs steht dabei")
+        check(schritte[0]["count"] == 1 and schritte[0]["first_seen"],
+              "der Uebergang wird gezaehlt und datiert")
+        check(karte["current"]["search"] == andere["view"],
+              "die Karte weiss, auf welcher Ansicht die Instanz gerade steht")
+        # Zurueck und wieder vor: das ist ein zweiter Weg, kein zweiter Knoten.
+        await seite.set_content(SEITE)
+        await catalog.capture(seite, "search", trigger="Zurueck")
+        await seite.set_content(ZWEITE_SEITE)
+        await catalog.capture(seite, "search", trigger="Pruefung")
+        karte = catalog.graph("search")
+        check(len(karte["views"]) == 2, "kein neuer Knoten durch eine bekannte Ansicht")
+        check(len(karte["steps"]) == 2, "der Rueckweg ist ein eigener Uebergang")
+        vorwaerts = [s for s in karte["steps"] if s["trigger"] == "Pruefung"]
+        check(vorwaerts and vorwaerts[0]["count"] == 2,
+              "derselbe Weg zum zweiten Mal erhoeht nur den Zaehler")
+        instanz.catalogue = True
+
         # ------------------------------------- Picker auf gespeicherter Kopie
         gefaehrlich = gesichert.parent / "mit-skript.html"
         gefaehrlich.write_text(

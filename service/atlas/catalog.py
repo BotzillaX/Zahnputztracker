@@ -35,6 +35,11 @@ MAX_ARRIVALS = 20
 # reported; known views keep counting.
 MAX_VIEWS = 200
 
+# The step from one view to the next, per instance. Two views connected
+# by the action that led from the first to the second is what makes the
+# collected material a map instead of a list.
+MAX_EDGES = 500
+
 # Both parts of the path come from the outside (from the address of a
 # request). They are checked before they touch the filesystem, so a name
 # can never reach out of the catalogue directory.
@@ -77,6 +82,99 @@ def _write_json(target: Path, data: Dict[str, Any]) -> None:
     os.replace(temporary, target)
 
 
+# ------------------------------------------------------------------ the steps
+
+# The view each instance was last on. Only kept while the application
+# runs: after a restart the first view of a run has no predecessor, and
+# an invented one would be worse than none.
+_last: Dict[str, str] = {}
+
+
+def _edges_file(scope: str) -> Path:
+    if scope not in _SCOPES:
+        raise ValueError("unbekannte Browser-Instanz")
+    return root() / scope / "edges.json"
+
+
+def _read_edges(scope: str) -> Dict[str, Dict[str, Any]]:
+    try:
+        stored = json.loads(_edges_file(scope).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(stored, dict):
+        return {}
+    return {key: value for key, value in stored.items() if isinstance(value, dict)}
+
+
+def _note_step(scope: str, digest: str, trigger: str) -> None:
+    """Remember that this view followed the one before it.
+
+    Never raises. The catalogue is an observer of the run, and losing a
+    line of the map is not worth interrupting anything for.
+    """
+    previous = _last.get(scope, "")
+    _last[scope] = digest
+    if not previous or previous == digest:
+        return
+    try:
+        edges = _read_edges(scope)
+        key = f"{previous}>{digest}>{trigger}"
+        edge = edges.get(key) or {
+            "from": previous,
+            "to": digest,
+            "trigger": trigger,
+            "first_seen": _now(),
+            "count": 0,
+        }
+        edge["count"] = int(edge.get("count") or 0) + 1
+        edge["last_seen"] = _now()
+        edges[key] = edge
+        if len(edges) > MAX_EDGES:
+            oldest = sorted(edges.items(), key=lambda item: str(item[1].get("last_seen") or ""))
+            for stale, _ in oldest[: len(edges) - MAX_EDGES]:
+                edges.pop(stale, None)
+        _write_json(_edges_file(scope), edges)
+    except Exception:  # noqa: BLE001 - an observer never stops the run
+        pass
+
+
+def _drop_steps(scope: str, digest: str) -> None:
+    """Remove every step that leads to or from a forgotten view."""
+    try:
+        edges = _read_edges(scope)
+        left = {
+            key: edge
+            for key, edge in edges.items()
+            if edge.get("from") != digest and edge.get("to") != digest
+        }
+        if len(left) != len(edges):
+            _write_json(_edges_file(scope), left)
+    except Exception:  # noqa: BLE001
+        pass
+    if _last.get(scope) == digest:
+        _last.pop(scope, None)
+
+
+def transitions(scope: Optional[str] = None) -> List[Dict[str, Any]]:
+    """Every observed step, most recently seen first."""
+    found: List[Dict[str, Any]] = []
+    for name in [scope] if scope else list(_SCOPES):
+        for edge in _read_edges(name).values():
+            found.append({**edge, "scope": name})
+    found.sort(key=lambda edge: str(edge.get("last_seen") or ""), reverse=True)
+    return found
+
+
+def graph(scope: Optional[str] = None) -> Dict[str, Any]:
+    """Views and the steps between them: the material for the map."""
+    names = [scope] if scope else list(_SCOPES)
+    return {
+        "views": views(scope),
+        "steps": transitions(scope),
+        "current": {name: _last.get(name, "") for name in names},
+    }
+
+
 async def capture(page: Any, scope: str, trigger: str = "Navigation") -> Optional[Dict[str, Any]]:
     """Record the view currently shown. Returns its record, or None.
 
@@ -111,11 +209,15 @@ async def capture(page: Any, scope: str, trigger: str = "Navigation") -> Optiona
             arrivals.append(trigger)
         meta["arrivals"] = arrivals[-MAX_ARRIVALS:]
         _write_json(meta_file, meta)
+        _note_step(scope, digest, trigger)
         bus.publish("view_seen", scope=scope, view=digest, count=meta["count"])
         return meta
 
     if _count_views(scope) >= MAX_VIEWS:
         bus.publish("view_limit", scope=scope, limit=MAX_VIEWS)
+        # No step is remembered towards a view that was not kept: a line
+        # on the map whose end does not exist explains nothing.
+        _last.pop(scope, None)
         return {"view": digest, "scope": scope, "url": url, "stored": False, "count": 0}
 
     folder.mkdir(parents=True, exist_ok=True)
@@ -143,6 +245,7 @@ async def capture(page: Any, scope: str, trigger: str = "Navigation") -> Optiona
         "elements": len(signature.splitlines()),
     }
     _write_json(meta_file, meta)
+    _note_step(scope, digest, trigger)
     bus.publish("view_new", scope=scope, view=digest, url=url, trigger=trigger)
     return meta
 
@@ -190,6 +293,7 @@ def forget(scope: str, digest: str) -> None:
     folder = _view_dir(scope, digest)
     if folder.parent.parent != root():
         raise ValueError("unbekannte Ansicht")
+    _drop_steps(scope, digest)
     if not folder.is_dir():
         return
     for entry in folder.iterdir():
