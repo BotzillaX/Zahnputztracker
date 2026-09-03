@@ -2,11 +2,20 @@
 
 ## 0. Antwortstil (gilt immer)
 
-Kurz. Keine Wiederholung des Gefragten, keine Zusammenfassung dessen, was
-gerade getan wurde, wenn es im Diff steht. Aber **keine wichtige Information
-weglassen**: was kaputt ist, was der Benutzer tun muss, was nicht geprüft
-werden konnte, gehört in die Antwort. Lieber vier klare Sätze als zwanzig
-höfliche.
+**Obergrenze sechs Sätze.** Wer mehr braucht, hat nicht zu Ende gedacht.
+Einzige Ausnahme: eine nummerierte Liste mit Befehlen zum Abarbeiten.
+
+Verboten:
+
+- wiederholen, was gefragt wurde
+- zusammenfassen, was im Diff steht
+- begründen, was niemand angezweifelt hat
+- erklären, was der Benutzer nicht gefragt hat
+- vorwegnehmen, was er als Nächstes fragen könnte
+- einordnen, abwägen, anbieten, absichern
+
+Was kaputt ist, was der Benutzer tun muss und was ungeprüft blieb, fehlt
+trotzdem nie. Das sind zwei Sätze, nicht zehn.
 
 Deutsch für alles, was der Benutzer liest. Englisch für Code, Kommentare und
 Commit-Nachrichten. Keine Gedankenstriche als Klammern, runde Klammern
