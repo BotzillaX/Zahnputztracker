@@ -57,32 +57,27 @@ dir %USERPROFILE%\.tauri
 
 ---
 
-## Schritt 2: Öffentlichen Schlüssel eintragen
+## Schritt 2: Öffentlichen Schlüssel eintragen — erledigt
 
-Öffne `%USERPROFILE%\.tauri\zahnputztracker.key.pub` in einem
-Texteditor. Darin steht ein einziger langer Block ohne Leerzeichen.
-Kopiere ihn vollständig.
-
-Öffne dann `src-tauri\tauri.conf.json`. Ganz unten steht:
+Der öffentliche Schlüssel aus Schritt 1 und das Konto `BotzillaX`
+stehen bereits in `src-tauri\tauri.conf.json`:
 
 ```json
 "plugins": {
   "updater": {
     "endpoints": [
-      "https://github.com/PLATZHALTER-KONTO/Zahnputztracker/releases/latest/download/latest.json"
+      "https://github.com/BotzillaX/Zahnputztracker/releases/latest/download/latest.json"
     ],
-    "pubkey": "PLATZHALTER-OEFFENTLICHER-SCHLUESSEL",
+    "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6ICg...)"
 ```
 
-Ersetze:
-
-- `PLATZHALTER-OEFFENTLICHER-SCHLUESSEL` durch den kopierten Block
-- `PLATZHALTER-KONTO` durch deinen GitHub-Benutzernamen
-
-Speichern.
+Hier ist nichts mehr zu tun. Dieser Schritt wird nur noch einmal
+gebraucht, falls das Schlüsselpaar neu erzeugt wird (siehe die Warnung
+ganz unten) oder das Repository unter einem anderen Namen liegt. Dann
+gehören `pubkey` und die Adresse in `endpoints` zusammen angepasst.
 
 **Geschafft, wenn** in den Einstellungen der Anwendung der Knopf nicht
-mehr "Updates noch nicht eingerichtet" sagt, sondern "Aktuell (v0.1.0)".
+"Updates noch nicht eingerichtet" sagt, sondern "Aktuell (v0.1.0)".
 Dafür muss die Anwendung neu gebaut werden (`npm run tauri dev` reicht).
 
 ---
@@ -92,8 +87,8 @@ Dafür muss die Anwendung neu gebaut werden (`npm run tauri dev` reicht).
 Das Repository muss dafür schon auf GitHub liegen. Falls nicht:
 
 ```bash
-git remote add origin https://github.com/DEIN-KONTO/Zahnputztracker.git
-git push -u origin main
+git remote add origin https://github.com/BotzillaX/Zahnputztracker.git
+git push -u origin master
 ```
 
 Dann im Browser:
@@ -179,7 +174,7 @@ von selbst.
 
 | Was du siehst | Was los ist |
 |---|---|
-| Knopf sagt "Updates noch nicht eingerichtet" | In `tauri.conf.json` steht noch ein Platzhalter (Schritt 2). |
+| Knopf sagt "Updates noch nicht eingerichtet" | In `tauri.conf.json` steht wieder ein Platzhalter (Schritt 2). |
 | Knopf sagt "Prüfung fehlgeschlagen" | Zeig mit der Maus darauf, dann steht der Grund da. Meistens: es gibt noch kein veröffentlichtes Release, oder kein Netz. |
 | Der Lauf unter Actions ist rot | Öffne ihn und sieh dir den ersten roten Schritt an. Fehlt ein Geheimnis, steht dort "secret not found". |
 | Das Update wird abgelehnt | Der öffentliche Schlüssel in der Anwendung passt nicht zum privaten bei GitHub. Schritt 2 wiederholen. |

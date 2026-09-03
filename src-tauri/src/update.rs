@@ -22,10 +22,10 @@ use tauri_plugin_updater::UpdaterExt;
 
 use crate::supervisor::{self, Supervisor};
 
-/// Both values in the configuration still have to be replaced once, by
-/// hand, with the account and the public key (see docs\signatur.md).
-/// Until then the button says so instead of reporting an error nobody
-/// can act on.
+/// Both values in the configuration are filled in (see
+/// docs\signatur.md). Should a fresh key pair ever put a placeholder
+/// back, the button says so instead of reporting an error nobody can
+/// act on.
 const PLACEHOLDER: &str = "PLATZHALTER";
 
 const FIRST_CHECK: Duration = Duration::from_secs(5);

@@ -40,9 +40,9 @@
   "plugins": {
     "updater": {
       "endpoints": [
-        "https://github.com/PLATZHALTER-KONTO/Zahnputztracker/releases/latest/download/latest.json"
+        "https://github.com/BotzillaX/Zahnputztracker/releases/latest/download/latest.json"
       ],
-      "pubkey": "PLATZHALTER-OEFFENTLICHER-SCHLUESSEL",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDY3N0NDNzQyMEU5RUYwQTAKUldTZzhKNE9Rc2Q4WnpqRVVVenQrQkdobTN3T2tGbnlBUVNTRzd0eXRlV0tadHkvWFZJYVM1OEwK",
       "windows": {
         "installMode": "passive"
       }
