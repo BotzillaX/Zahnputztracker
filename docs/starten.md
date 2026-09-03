@@ -3,7 +3,7 @@
 ## Im Entwicklungsbetrieb
 
 ```
-cd C:\Users\KevinFritsch\Documents\Zahnputztracker
+cd <Projektordner>
 npm run tauri dev
 ```
 
